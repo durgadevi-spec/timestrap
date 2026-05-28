@@ -57,7 +57,7 @@ export default function PlanForDayPage() {
 
     return tasks.map((task, index) => {
       const scheduleData = typeof task.scheduleData === 'object' && task.scheduleData ? task.scheduleData : {};
-      const baseDuration = scheduleData.durationMinutes || task.durationMinutes || 60;
+      const baseDuration = scheduleData.durationMinutes || task.durationMinutes || 30;
       const startTime = scheduleData.startTime || task.startTime || toTime(cursor);
       const startMin = toMinutes(startTime);
       const endTime = scheduleData.endTime || task.endTime || toTime(startMin + baseDuration);
@@ -336,7 +336,7 @@ export default function PlanForDayPage() {
   );
 
   const totalWorkingMinutes = selectedTasks.reduce((sum, task) => {
-    return sum + (task.scheduleData?.durationMinutes || task.durationMinutes || 60);
+    return sum + (task.scheduleData?.durationMinutes || task.durationMinutes || 30);
   }, 0);
   const isValidPlan = totalWorkingMinutes >= 540;
 
@@ -624,7 +624,7 @@ export default function PlanForDayPage() {
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <p className="text-[10px] uppercase text-slate-500 font-bold">Duration</p>
-                          <p className="text-sm font-black text-blue-300">{Math.max(30, task.durationMinutes || 60)} minutes</p>
+                          <p className="text-sm font-black text-blue-300">{Math.max(30, task.durationMinutes || 30)} minutes</p>
                         </div>
                         <Button type="button" size="sm" variant="outline" className="rounded-xl border-blue-500/30 text-blue-300" onClick={() => extendTask(task.id)}>Extend +30m</Button>
                       </div>

@@ -781,31 +781,115 @@ export async function registerRoutes(
     }
   });
 
-  // Update a time entry (only if pending)
-  app.put("/api/time-entries/:id", async (req, res) => {
+  app.put("/api/time-entries/:id/status", async (req, res) => {
     try {
       const { id } = req.params;
-      const entry = await storage.getTimeEntry(id);
+      const { status, approvedBy, rejectionReason, onHoldReason, managerApprovedBy, approvalComment } = req.body;
 
+      const entry = await storage.getTimeEntry(id);
       if (!entry) {
         return res.status(404).json({ error: "Time entry not found" });
       }
 
-      if (entry.status !== 'pending' && entry.status !== 'rejected') {
-        return res.status(400).json({ error: "Cannot edit entry that is not pending or rejected" });
+      const updateData: any = { status };
+
+      if (status === 'approved') {
+        if (managerApprovedBy) {
+          updateData.managerApprovedBy = managerApprovedBy;
+          updateData.managerApprovedAt = new Date();
+          updateData.managerApproved = true;
+          if (approvalComment) updateData.approvalComment = approvalComment;
+        } else if (approvedBy) {
+          updateData.approvedBy = approvedBy;
+          updateData.approvedAt = new Date();
+          if (approvalComment) updateData.approvalComment = approvalComment;
+        }
+      } else if (status === 'rejected') {
+        updateData.rejectionReason = rejectionReason;
+        updateData.managerApproved = false; // Reset approval status on rejection
+        updateData.managerApprovedBy = null;
+        updateData.managerApprovedAt = null;
+      } else if (status === 'on-hold') {
+        updateData.onHoldReason = onHoldReason;
       }
 
-      // If it was rejected, reset status to pending upon update
-      const updateData = entry.status === 'rejected'
-        ? { ...req.body, status: 'pending', rejectionReason: null }
-        : req.body;
-
-      const updatedEntry = await storage.updateTimeEntry(id, updateData);
-      broadcast("time_entry_updated", updatedEntry);
-      res.json(updatedEntry);
+      const updated = await storage.updateTimeEntryStatus(id, updateData);
+      broadcast("time_entry_updated", await enrichEntry(updated));
+      res.json(await enrichEntry(updated));
     } catch (error) {
-      console.error("Update time entry error:", error);
-      res.status(500).json({ error: "Failed to update time entry" });
+      console.error("Update time entry status error:", error);
+      res.status(500).json({ error: "Failed to update time entry status" });
+    }
+  });
+
+  // ============ CALENDAR SYNC TIME ENTRIES ============
+  app.post("/api/time-entries/sync-calendar", async (req, res) => {
+    try {
+      const { employeeId, event } = req.body;
+      if (!employeeId || !event) {
+        return res.status(400).json({ error: "employeeId and event are required" });
+      }
+
+      const isBreak = event.title?.toLowerCase().includes("break") || event.title?.toLowerCase().includes("lunch");
+      if (isBreak) {
+        return res.json({ success: true, ignored: true });
+      }
+
+      const employee = await storage.getEmployee(employeeId);
+      if (!employee) {
+        return res.status(404).json({ error: "Employee not found" });
+      }
+
+      const date = event.date;
+      const tStart = event.startTime;
+      const tEnd = event.endTime;
+      const [sh, sm] = tStart.split(':').map(Number);
+      const [eh, em] = tEnd.split(':').map(Number);
+      const diffMin = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+      const totalHours = `${String(Math.floor(diffMin / 60)).padStart(2, '0')}:${String(diffMin % 60).padStart(2, '0')}`;
+
+      // Check for existing entry
+      const existingEntries = await storage.getTimeEntriesByEmployee(employeeId);
+      const match = existingEntries.find((e: any) => {
+         if (e.date !== date) return false;
+         if (event.pmsId) return e.pmsId === event.pmsId || e.pmsSubtaskId === event.pmsId;
+         return e.taskDescription === event.title;
+      });
+
+      if (match) {
+        // Update if pending, draft, or rejected. If approved/submitted, skip modifying it to prevent data corruption.
+        if (match.status === 'pending' || match.status === 'rejected' || match.status === 'draft') {
+           const updated = await pool.query(
+             `UPDATE time_entries SET start_time = $1, end_time = $2, total_hours = $3 WHERE id = $4 RETURNING *`,
+             [tStart, tEnd, totalHours, match.id]
+           );
+           broadcast("time_entry_updated", await enrichEntry(updated.rows[0]));
+           return res.json({ success: true, action: "updated", entry: await enrichEntry(updated.rows[0]) });
+        } else {
+           return res.json({ success: true, action: "skipped_locked" });
+        }
+      } else {
+        // Create new
+        const entry = await storage.createTimeEntry({
+           employeeId,
+           employeeCode: employee.employeeCode,
+           employeeName: employee.name,
+           date: date,
+           projectName: event.project || "General",
+           taskDescription: event.title,
+           quantify: "",
+           startTime: tStart,
+           endTime: tEnd,
+           totalHours,
+           pmsId: event.pmsId || null,
+           status: 'draft'
+        });
+        broadcast("time_entry_created", entry);
+        return res.json({ success: true, action: "created", entry });
+      }
+    } catch (error) {
+      console.error("Calendar sync time entry error:", error);
+      res.status(500).json({ error: "Failed to sync calendar to time entries" });
     }
   });
 
@@ -2036,6 +2120,10 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
         plan = await storage.createDailyPlan({ employeeId, date: planDate });
       }
 
+      // Fetch existing time entries for today to avoid duplicates
+      const existingEntries = await storage.getTimeEntriesByEmployee(employeeId);
+      const todayEntries = existingEntries.filter((e: any) => e.date === planDate);
+
       // Save selected tasks
       for (const t of selectedTasks) {
         await storage.createPlanTask({
@@ -2055,6 +2143,49 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
             extensionReason: t.extensionReason || null,
           }
         });
+
+        if (employee) {
+          const tStart = t.scheduleData?.startTime || t.startTime || "09:00";
+          const tEnd = t.scheduleData?.endTime || t.endTime || "10:00";
+          const [sh, sm] = tStart.split(':').map(Number);
+          const [eh, em] = tEnd.split(':').map(Number);
+          const diffMin = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+          const totalHours = `${String(Math.floor(diffMin / 60)).padStart(2, '0')}:${String(diffMin % 60).padStart(2, '0')}`;
+
+          const isBreak = t.isBreak || t.task_name?.toLowerCase().includes("break") || t.task_name?.toLowerCase().includes("lunch");
+          
+          if (!isBreak) {
+            // Check if we already created a time entry for this task on this date
+            const alreadyExists = todayEntries.some((e: any) => {
+               if (t.id && !t.id.startsWith('planned-') && !t.id.startsWith('break-')) {
+                  return e.pmsId === t.id || e.pmsSubtaskId === t.id;
+               }
+               return e.taskDescription === t.task_name;
+            });
+
+            if (!alreadyExists) {
+              await storage.createTimeEntry({
+                employeeId,
+                employeeCode: employee.employeeCode,
+                employeeName: employee.name,
+                date: planDate,
+                projectName: t.projectName || t.project_code || "General",
+                taskDescription: t.task_name,
+                quantify: "",
+                startTime: tStart,
+                endTime: tEnd,
+                totalHours,
+                pmsId: t.id && !t.id.startsWith('planned-') && !t.id.startsWith('break-') ? t.id : null,
+                status: 'draft'
+              });
+              todayEntries.push({
+                date: planDate,
+                pmsId: t.id && !t.id.startsWith('planned-') && !t.id.startsWith('break-') ? t.id : null,
+                taskDescription: t.task_name
+              } as any);
+            }
+          }
+        }
       }
 
       // Save unselected tasks as postponements

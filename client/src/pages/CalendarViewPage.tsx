@@ -850,6 +850,19 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
     setModal({ mode: "edit", event });
   };
 
+  const syncEventToTimeEntry = async (event: CalendarEvent) => {
+    if (!user?.id) return;
+    try {
+      await fetch('/api/time-entries/sync-calendar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employeeId: user.id, event })
+      });
+    } catch (err) {
+      console.error("Failed to sync event to time entries:", err);
+    }
+  };
+
   const handleEventDrop = (draggedEvent: CalendarEvent, targetHour: number): void => {
     console.log(`handleEventDrop called with event:`, draggedEvent, `targetHour:`, targetHour);
     console.log(`Dragged event has googleEventId: ${draggedEvent.googleEventId}`);
@@ -886,6 +899,8 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
       console.log(`Persisting plan update with googleEventId: ${updatedEvent.googleEventId}`);
       persistPlanUpdate(user?.id, updatedEvent.date, updatedEvent);
     }
+
+    syncEventToTimeEntry(updatedEvent);
 
     toast({
       title: "✅ Event Moved",
@@ -1021,6 +1036,8 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
     } else if (nextEvent.source === "plan") {
       persistPlanUpdate(user?.id, existingEvent?.date, nextEvent);
     }
+
+    syncEventToTimeEntry(nextEvent);
 
     setModal(null);
   };
