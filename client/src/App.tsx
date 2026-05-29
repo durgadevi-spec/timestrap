@@ -30,6 +30,8 @@ import DiscussionPage from '@/pages/DiscussionPage';
 import PlanForDayPage from '@/pages/PlanForDayPage';
 import CalendarViewPage from '@/pages/CalendarViewPage';
 import NotFound from '@/pages/not-found';
+import PrivacyPolicy from '@/pages/PrivacyPolicy';
+import TermsOfService from '@/pages/TermsOfService';
 import type { TimeEntry } from '@shared/schema';
 import ChatPanel from '@/components/ChatPanel';
 
@@ -206,7 +208,17 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <AuthProvider>
-          <AppContent />
+          <Switch>
+            <Route path="/privacy-policy">
+              <PrivacyPolicy />
+            </Route>
+            <Route path="/terms-of-service">
+              <TermsOfService />
+            </Route>
+            <Route>
+              <AppContent />
+            </Route>
+          </Switch>
           <MascotDolls />
           <Toaster />
         </AuthProvider>
