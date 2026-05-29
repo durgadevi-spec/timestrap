@@ -114,7 +114,7 @@ export const getProjects = async (userRole?: string, userEmpCode?: string, userD
   try {
     console.log("🔍 PMS getProjects called with:", { userRole, userEmpCode, userDepartment });
 
-    const isAdmin = userRole === 'admin' || (userRole !== 'employee' && (userEmpCode === 'E0001' || userEmpCode === 'E0046' || userEmpCode === 'E0002' || userEmpCode === 'E0048'));
+    const isAdmin = userRole === 'admin' || userEmpCode === 'E0001' || userEmpCode === 'E0000';
     console.log(`👤 User context: role=${userRole}, empCode=${userEmpCode}, isAdmin=${isAdmin}`);
 
     console.log("📡 Executing PMS query to fetch Projects with departments...");
@@ -261,13 +261,7 @@ export const getTasks = async (projectId?: string, userDepartment?: string, user
     console.log("📡 Executing PMS getTasks query for project:", projectId, "userRole:", userRole, "userEmpCode:", userEmpCode);
     
     // Check if user is an admin or specifically authorized
-    const isAdmin = userRole === 'admin' || 
-                    (userRole !== 'employee' && (
-                      userEmpCode === 'E0001' || 
-                      userEmpCode === 'E0046' || 
-                      userEmpCode === 'E0002' || 
-                      userEmpCode === 'E0048'
-                    ));
+    const isAdmin = userRole === 'admin' || userEmpCode === 'E0001' || userEmpCode === 'E0000';
     
     console.log(`📋 getTasks auth context: isAdmin=${isAdmin}, userEmpCode=${userEmpCode}, userRole=${userRole}, projectCode=${projectId}`);
 
@@ -313,7 +307,7 @@ export const getDepartmentTasks = async (userDepartment: string, userEmpCode: st
   try {
     console.log("📡 Executing PMS getDepartmentTasks query for dept:", userDepartment);
     
-    const isAdmin = userRole === 'admin' || (userRole !== 'employee' && (userEmpCode === 'E0001' || userEmpCode === 'E0046' || userEmpCode === 'E0002' || userEmpCode === 'E0048'));
+    const isAdmin = userRole === 'admin' || userEmpCode === 'E0001' || userEmpCode === 'E0000';
     
     // Fetch all projects in the department first to get their metadata
     const projects = await getProjects(userRole, userEmpCode, userDepartment);
@@ -354,7 +348,7 @@ export const getDepartmentTasks = async (userDepartment: string, userEmpCode: st
 export const getTasksByProject = async (projectId: string, userDepartment?: string, userEmpCode?: string, userRole?: string): Promise<PMSTask[]> => {
   try {
     console.log("🔍 PMS getTasksByProject called with projectId:", projectId, "userEmpCode:", userEmpCode, "userRole:", userRole);
-    const isAdmin = userRole === 'admin' || (userRole !== 'employee' && (userEmpCode === 'E0001' || userEmpCode === 'E0046' || userEmpCode === 'E0002' || userEmpCode === 'E0048'));
+    const isAdmin = userRole === 'admin' || userEmpCode === 'E0001' || userEmpCode === 'E0000';
 
     console.log("📡 Executing PMS getTasksByProject query...");
 
