@@ -581,7 +581,7 @@ export default function TrackerPage({ user }: TrackerPageProps) {
   const alreadySubmittedToday = !!dailySubmission;
   const needsPlan = formattedDate === currentToday && !dailyPlanStatus?.submitted;
 
-  // Allow submission if there are pending (draft) tasks,
+  // Allow submission if there are pending (draft) tasks or server entries,
   // a plan exists for today,
   // AND total hours (Worked + LMS) >= 8 hours
   // AND not already submitted
@@ -592,7 +592,7 @@ export default function TrackerPage({ user }: TrackerPageProps) {
     !isSubmitting &&
     !alreadySubmittedToday &&
     !needsPlan &&
-    pendingTasks.length > 0 &&
+    todaysTasksOnly.length > 0 &&
     (hasEnoughHours || settings.forceAllowFinalSubmit);
 
 
