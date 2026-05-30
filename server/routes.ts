@@ -781,6 +781,111 @@ export async function registerRoutes(
     }
   });
 
+  // ============ UPDATE TIME ENTRY (EDIT) ============
+  app.put("/api/time-entries/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const entryData = {
+        projectName: req.body.projectName,
+        taskDescription: req.body.taskDescription,
+        problemAndIssues: req.body.problemAndIssues || null,
+        quantify: req.body.quantify || "",
+        achievements: req.body.achievements || null,
+        scopeOfImprovements: req.body.scopeOfImprovements || null,
+        toolsUsed: req.body.toolsUsed || [],
+        startTime: req.body.startTime,
+        endTime: req.body.endTime,
+        totalHours: req.body.totalHours,
+        percentageComplete: req.body.percentageComplete || 0,
+        pmsId: req.body.pmsId || null,
+        pmsSubtaskId: req.body.pmsSubtaskId || null,
+        keyStep: req.body.keyStep || null,
+      };
+
+      // Validate the data
+      const result = insertTimeEntrySchema.partial().safeParse(entryData);
+      if (!result.success) {
+        console.error("[TIME-ENTRY-UPDATE] Validation error:", result.error);
+        return res.status(400).json({ error: result.error });
+      }
+
+      // Check if time entry exists
+      const entry = await storage.getTimeEntry(id);
+      if (!entry) {
+        return res.status(404).json({ error: "Time entry not found" });
+      }
+
+      // Only allow editing draft or pending entries
+      if (entry.status && !['draft', 'pending', 'rejected'].includes(entry.status)) {
+        return res.status(403).json({ error: "Only pending or draft entries can be edited" });
+      }
+
+      // Update the time entry
+      const updated = await storage.updateTimeEntry(id, result.data);
+
+      // Handle PMS Status Synchronization if progress changed
+      try {
+        console.log(`[PMS-SYNC] Starting update sync. pmsId: ${req.body.pmsId}, pmsSubtaskId: ${req.body.pmsSubtaskId}, progress: ${entryData.percentageComplete}%`);
+        if (entry.percentageComplete !== entryData.percentageComplete) {
+          const { updateSubtaskProgress, updateTaskProgress } = await import('./pmsSupabase');
+
+          let targetProjectId: string | null = null;
+
+          // CASE 1: Subtask exists - update subtask progress
+          if (req.body.pmsSubtaskId) {
+            console.log(`[PMS-SYNC] Updating subtask ${req.body.pmsSubtaskId} progress during edit`);
+            await updateSubtaskProgress(req.body.pmsSubtaskId, entryData.percentageComplete);
+            
+            // Resolve project ID for broadcast
+            const res = await pmsPool.query('SELECT project_id FROM project_tasks pt JOIN subtasks s ON pt.id = s.task_id WHERE s.id = $1::uuid', [req.body.pmsSubtaskId]);
+            if (res.rows && res.rows.length > 0) targetProjectId = res.rows[0].project_id;
+          }
+          // CASE 2: No subtask - update task progress directly
+          else if (req.body.pmsId) {
+            console.log(`[PMS-SYNC] Updating task ${req.body.pmsId} progress during edit`);
+            await updateTaskProgress(req.body.pmsId, entryData.percentageComplete, entry.date);
+            
+            // Resolve project ID for broadcast
+            const res = await pmsPool.query('SELECT project_id FROM project_tasks WHERE id = $1::uuid', [req.body.pmsId]);
+            if (res.rows && res.rows.length > 0) targetProjectId = res.rows[0].project_id;
+          }
+
+          // If we found the project, synchronize points and broadcast
+          if (targetProjectId) {
+            const { getProjectProgress } = await import('./pmsSupabase');
+            const finalProgress = await getProjectProgress(targetProjectId);
+            console.log(`[PMS-SYNC] Final Project ${targetProjectId} progress after edit: ${finalProgress}%`);
+            
+            // Sync with gamification points (Max 600 points = 100%)
+            const targetPoints = Math.round(finalProgress * 6);
+            try {
+              await pool.query(
+                `INSERT INTO project_points (project_id, points, last_active) 
+                 VALUES ($1, $2, NOW()) 
+                 ON CONFLICT (project_id) DO UPDATE SET points = EXCLUDED.points, last_active = NOW()`,
+                [entry.projectName, targetPoints]
+              );
+            } catch (pErr) { console.error('Failed to sync project points:', pErr); }
+
+            broadcast("project_progress_updated", { 
+              projectId: entry.projectName, 
+              progress: finalProgress,
+              points: targetPoints
+            });
+          }
+        }
+      } catch (pmsSyncError) {
+        console.error("[PMS-SYNC] Error during update sync:", pmsSyncError);
+      }
+
+      broadcast("time_entry_updated", await enrichEntry(updated!));
+      res.json(await enrichEntry(updated!));
+    } catch (error) {
+      console.error("Update time entry error:", error);
+      res.status(500).json({ error: "Failed to update time entry" });
+    }
+  });
+
   app.put("/api/time-entries/:id/status", async (req, res) => {
     try {
       const { id } = req.params;
