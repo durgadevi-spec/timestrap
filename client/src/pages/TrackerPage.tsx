@@ -731,81 +731,83 @@ export default function TrackerPage({ user }: TrackerPageProps) {
 
     setIsSubmitting(true);
     try {
-      if (pendingTasks.length === 0) {
+      // Check if there are any tasks to submit (either pending local or server entries)
+      if (todaysTasksOnly.length === 0) {
         toast({ title: 'Nothing to submit', description: 'Please add at least one task before submitting.', variant: 'destructive' });
         setIsSubmitting(false);
         return;
       }
 
-      // Detailed validation of each pending task
-      const invalidTasks = pendingTasks.filter(t => {
-        const hasProject = !!t.project;
-        const hasTitle = !!t.title;
-        const hasTimes = !!t.startTime && !!t.endTime;
-        const hasTools = t.toolsUsed && t.toolsUsed.length > 0;
-        const hasQuantify = !!(t as any).quantify;
-        return !hasProject || !hasTitle || !hasTimes || !hasTools || !hasQuantify;
-      });
-
-      if (invalidTasks.length > 0) {
-        toast({
-          title: 'Incomplete Tasks',
-          description: `Please fill in all required fields (Project, Task, Start/End Time, Quantify, Tools) for all tasks before submitting.`,
-          variant: 'destructive'
+      // Step 1: If there are pending (local) tasks, submit them first
+      if (pendingTasks.length > 0) {
+        // Detailed validation of each pending task
+        const invalidTasks = pendingTasks.filter(t => {
+          const hasProject = !!t.project;
+          const hasTitle = !!t.title;
+          const hasTimes = !!t.startTime && !!t.endTime;
+          const hasTools = t.toolsUsed && t.toolsUsed.length > 0;
+          const hasQuantify = !!(t as any).quantify;
+          return !hasProject || !hasTitle || !hasTimes || !hasTools || !hasQuantify;
         });
-        setIsSubmitting(false);
-        return;
+
+        if (invalidTasks.length > 0) {
+          toast({
+            title: 'Incomplete Tasks',
+            description: `Please fill in all required fields (Project, Task, Start/End Time, Quantify, Tools) for all tasks before submitting.`,
+            variant: 'destructive'
+          });
+          setIsSubmitting(false);
+          return;
+        }
+
+        // Check for overlapping times or invalid durations
+        const hasInvalidDuration = pendingTasks.some(t => calculateTaskMinutes(t) <= 0);
+        if (hasInvalidDuration) {
+          toast({
+            title: 'Invalid Time Entries',
+            description: 'One or more tasks have invalid start/end times. Please correct them.',
+            variant: 'destructive'
+          });
+          setIsSubmitting(false);
+          return;
+        }
+
+        // Submit all pending tasks to database in parallel
+        await Promise.all(pendingTasks.map(task => 
+          apiRequest('POST', '/api/time-entries', {
+            employeeId: user.id,
+            employeeCode: user.employeeCode,
+            employeeName: user.name,
+            date: formattedDate,
+            projectName: task.project,
+            taskDescription: formatTaskDescription(task),
+            problemAndIssues: (task as any).problemAndIssues || '',
+            quantify: (task as any).quantify || '',
+            achievements: (task as any).achievements || '',
+            scopeOfImprovements: (task as any).scopeOfImprovements || '',
+            toolsUsed: task.toolsUsed || [],
+            startTime: task.startTime,
+            endTime: task.endTime,
+            totalHours: formatDuration(calculateTaskMinutes(task)),
+            percentageComplete: task.percentageComplete,
+            pmsId: task.pmsId,
+            pmsSubtaskId: (task as any).pmsSubtaskId,
+            keyStep: task.keyStep,
+            status: 'pending',
+          })
+        ));
       }
 
-      // Check for overlapping times or invalid durations
-      const hasInvalidDuration = pendingTasks.some(t => calculateTaskMinutes(t) <= 0);
-      if (hasInvalidDuration) {
-        toast({
-          title: 'Invalid Time Entries',
-          description: 'One or more tasks have invalid start/end times. Please correct them.',
-          variant: 'destructive'
-        });
-        setIsSubmitting(false);
-        return;
-      }
-
-      // Store tasks for confirmation display
-      const tasksToSubmit = [...pendingTasks];
-
-      // Submit all pending tasks to database in parallel for performance
-      await Promise.all(pendingTasks.map(task => 
-        apiRequest('POST', '/api/time-entries', {
-          employeeId: user.id,
-          employeeCode: user.employeeCode,
-          employeeName: user.name,
-          date: formattedDate,
-          projectName: task.project,
-          taskDescription: formatTaskDescription(task),
-          problemAndIssues: (task as any).problemAndIssues || '',
-          quantify: (task as any).quantify || '',
-          achievements: (task as any).achievements || '',
-          scopeOfImprovements: (task as any).scopeOfImprovements || '',
-          toolsUsed: task.toolsUsed || [],
-          startTime: task.startTime,
-          endTime: task.endTime,
-          totalHours: formatDuration(calculateTaskMinutes(task)), // Use calculated duration
-          percentageComplete: task.percentageComplete,
-          pmsId: task.pmsId,
-          pmsSubtaskId: (task as any).pmsSubtaskId,
-          keyStep: task.keyStep,
-          status: 'pending',
-        })
-      ));
-
-      // Send daily summary email to managers and confirmation to employee
+      // Step 2: Send daily summary email (works with both pending and server entries)
+      // This endpoint marks all today's draft entries as pending
       try {
         await apiRequest('POST', `/api/time-entries/submit-daily/${user.id}/${formattedDate}`);
       } catch (emailError) {
         console.log('Daily summary email notification skipped or failed', emailError);
       }
 
-      // Save submitted tasks for display and show confirmation
-      setSubmittedTasks(tasksToSubmit);
+      // Step 3: Show confirmation and celebrate
+      setSubmittedTasks([...todaysTasksOnly]);
       setShowSubmissionConfirm(true);
       try {
         confettiBurst();
