@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { WebSocketServer, WebSocket } from "ws";
+import { WebSocketServer, WebSocket, WebSocket as WSWebSocket } from "ws";
 import { storage } from "./storage";
 import { promises as fs } from "fs";
 import path from "path";   // ✅ KEEP THIS
@@ -30,7 +30,7 @@ import {
 import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createClient(supabaseUrl, supabaseKey, { realtime: { transport: WSWebSocket as any } });
 
 // Store connected WebSocket clients for real-time updates
 const clients: Set<WebSocket> = new Set();
@@ -1008,8 +1008,8 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Time entry not found" });
       }
 
-      if (entry.status !== 'pending') {
-        return res.status(400).json({ error: "Cannot delete entry that is not pending" });
+      if (entry.status !== 'pending' && entry.status !== 'draft') {
+        return res.status(400).json({ error: "Cannot delete entry that is not pending or draft" });
       }
 
       await storage.deleteTimeEntry(id);
