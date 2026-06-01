@@ -625,19 +625,19 @@ export default function TrackerPage({ user }: TrackerPageProps) {
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    // Allow deletion of local tasks OR server tasks that are still pending
+    // Allow deletion of local tasks OR server tasks that are in draft/pending state
     const task = allTasks.find(t => t.id === taskId);
 
     if (taskId.startsWith('local-')) {
       // Local task - remove from state and localStorage
       updatePendingTasks(pendingTasks.filter(t => t.id !== taskId));
-    } else if (task?.serverStatus === 'pending') {
+    } else if (task?.serverStatus === 'pending' || task?.serverStatus === 'draft') {
       // Server task - delete via API
       await deleteMutation.mutateAsync(taskId);
     } else {
       toast({
         title: "Cannot Delete",
-        description: "Only pending tasks can be deleted.",
+        description: "Only draft or pending tasks can be deleted from this view.",
         variant: "destructive",
       });
     }
