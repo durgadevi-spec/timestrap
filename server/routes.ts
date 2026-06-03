@@ -1095,6 +1095,15 @@ export async function registerRoutes(
         totalHours: totalHoursFormatted
       });
 
+      // Change all draft time entries to 'pending' status for this date
+      // This moves them from "editing phase" to "approval phase"
+      await pool.query(
+        `UPDATE time_entries 
+         SET status = $1 
+         WHERE employee_id = $2 AND date = $3 AND status = $4`,
+        ['pending', employeeId, date, 'draft']
+      );
+
       // use the raw entries as tasks so the email helper has full data
       const tasks = dailyEntries;
       const { sendTimesheetSummaryEmail, sendTimesheetConfirmationEmail } = await import('./email');

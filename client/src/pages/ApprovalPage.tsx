@@ -100,6 +100,11 @@ export default function ApprovalPage({ user }: { user: User }) {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
 
+  // Helper to check if entry should be shown in approvals (exclude draft entries)
+  const isApprovalEntry = (entry: ExtendedTimeEntry): boolean => {
+    return entry.status !== 'draft';
+  };
+
   const { data: rawTimeEntries = [], isLoading, refetch } = useQuery<ExtendedTimeEntry[]>({
     queryKey: ['/api/time-entries'],
   });
@@ -136,12 +141,14 @@ export default function ApprovalPage({ user }: { user: User }) {
 
   const uniqueTimeEntries = useMemo(() => {
     const seen = new Set<string>();
-    return rawTimeEntries.filter(e => {
-      const key = e.id.toString();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    return rawTimeEntries
+      .filter(e => isApprovalEntry(e)) // Exclude draft entries
+      .filter(e => {
+        const key = e.id.toString();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
   }, [rawTimeEntries]);
 
   // Status Summary Counts
