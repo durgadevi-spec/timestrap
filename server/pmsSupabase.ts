@@ -305,9 +305,12 @@ export const getTasks = async (projectId?: string, userDepartment?: string, user
 
 export const getDepartmentTasks = async (userDepartment: string, userEmpCode: string, userRole: string): Promise<any[]> => {
   try {
-    console.log("📡 Executing PMS getDepartmentTasks query for dept:", userDepartment);
+    console.log("📡 Executing PMS getDepartmentTasks query for dept:", userDepartment, "empCode:", userEmpCode, "role:", userRole);
     
-    const isAdmin = userRole === 'admin' || userEmpCode === 'E0001' || userEmpCode === 'E0000';
+    // Only treat as admin if the role is actually admin
+    // Don't hardcode E0001/E0000 as admin here since this function needs to respect the userRole parameter
+    // (when viewing my-tasks, userRole is 'employee' even for admin users)
+    const isAdmin = userRole === 'admin';
     
     // Fetch all projects in the department first to get their metadata
     const projects = await getProjects(userRole, userEmpCode, userDepartment);
@@ -319,20 +322,43 @@ export const getDepartmentTasks = async (userDepartment: string, userEmpCode: st
       return acc;
     }, {} as Record<string, any>);
 
+    console.log("📡 getDepartmentTasks query params - userEmpCode:", userEmpCode, "isAdmin:", isAdmin, "projectIds count:", projectIds.length);
+
     // Fetch all tasks for these projects that the user can see
-    const query = `
+    // For my-tasks: only tasks assigned to the user (via assignee field) or in task_members
+    // For admin: all tasks
+    // For department: all unassigned tasks or tasks with assignee in department
+    let query = `
       SELECT DISTINCT pt.*, pt.schedule_type, pt.schedule_data FROM project_tasks pt
       INNER JOIN projects p ON pt.project_id = p.id
-      LEFT JOIN task_members tm ON pt.id = tm.task_id
-      LEFT JOIN employees e ON tm.employee_id = e.id
       WHERE pt.project_id = ANY($1)
         AND (pt.status IS NULL OR LOWER(pt.status) != 'completed')
-        AND (LOWER(TRIM(e.emp_code)) = LOWER(TRIM($2)) OR $2 IS NULL OR $3 = TRUE OR tm.task_id IS NULL)
-      ORDER BY pt.task_name
     `;
     
-    const result: QueryResult = await pmsPool.query(query, [projectIds, userEmpCode || null, isAdmin]);
+    let queryParams: any[] = [projectIds];
+    
+    if (!isAdmin && userEmpCode) {
+      // For my-tasks: show only tasks assigned to this user via task_members table
+      query += `
+        AND EXISTS (
+          SELECT 1 FROM task_members tm 
+          INNER JOIN employees e ON tm.employee_id = e.id 
+          WHERE tm.task_id = pt.id 
+          AND LOWER(TRIM(e.emp_code)) = LOWER(TRIM($2))
+        )
+      `;
+      queryParams.push(userEmpCode);
+    }
+    // If isAdmin, show all tasks (no additional WHERE clause)
+    
+    query += ` ORDER BY pt.task_name`;
+    
+    console.log("📡 Query:", query, "Params:", queryParams);
+    
+    const result: QueryResult = await pmsPool.query(query, queryParams);
     const tasks = result.rows || [];
+    
+    console.log("📡 Retrieved tasks count:", tasks.length);
 
     // Enrich tasks with project info
     return tasks.map(task => ({

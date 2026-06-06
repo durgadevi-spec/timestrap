@@ -1,10 +1,11 @@
-import { useState, useMemo, useEffect, CSSProperties } from "react";
+import { useState, useMemo, useEffect, CSSProperties, useRef } from "react";
 import {
   format, addDays, addMonths, subMonths,
   startOfWeek, startOfMonth,
   isSameDay, isSameMonth,
 } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
+import { useTheme } from "@/context/ThemeContext";
 import {
   clearGoogleCalendarTokens,
   getGoogleAuthUrl,
@@ -59,6 +60,7 @@ interface DayColumnProps {
   onSlotClick: (day: Date, hour: number) => void;
   onEventClick: (event: CalendarEvent) => void;
   isToday: boolean;
+  colors?: any;
 }
 
 interface WeekGridProps {
@@ -67,6 +69,7 @@ interface WeekGridProps {
   onSlotClick: (day: Date, hour: number) => void;
   onEventClick: (event: CalendarEvent) => void;
   today: Date;
+  colors?: any;
 }
 
 interface MonthGridProps {
@@ -75,11 +78,13 @@ interface MonthGridProps {
   events: CalendarEvent[];
   onDayClick: (day: Date) => void;
   today: Date;
+  colors?: any;
 }
 
 interface MiniCalendarProps {
   value: Date;
   onChange: (day: Date) => void;
+  colors?: any;
 }
 
 interface EventModalProps {
@@ -259,14 +264,90 @@ const fmtHour = (h: number): string => {
   return h < 12 ? `${h} AM` : `${h - 12} PM`;
 };
 
-// ─── Components ───────────────────────────────────────────────────────────────
+// Helper function to calculate available slot duration at target time
+const getAvailableSlotDuration = (targetHour: number, dayEvents: CalendarEvent[]): number => {
+  const SLOT_END_HOUR = 23;
+  
+  // Find events that might conflict with starting at targetHour
+  const eventsAfter = dayEvents
+    .filter((evt) => toMin(evt.startTime) >= targetHour * 60)
+    .sort((a, b) => toMin(a.startTime) - toMin(b.startTime));
 
-function EventPill({ event, onClick, style, compact = false, onDragStart, onDragEnd }: EventPillProps & { onDragStart?: (e: React.DragEvent) => void; onDragEnd?: () => void }) {
-  const c = EVENT_COLORS[event.colorIdx ?? 0];
-  const dur = toMin(event.endTime) - toMin(event.startTime);
+  if (eventsAfter.length === 0) {
+    // No events after this hour, can use until end of day
+    return (SLOT_END_HOUR - targetHour) * 60;
+  }
+
+  const firstEventAfter = eventsAfter[0];
+  const availableMinutes = toMin(firstEventAfter.startTime) - (targetHour * 60);
+  
+  // Return available duration in minutes (minimum 30 mins)
+  return Math.max(30, availableMinutes);
+};
+
+// Current Time Indicator Component
+function CurrentTimeIndicator({ show = true }: { show?: boolean }) {
+  const [currentTime, setCurrentTime] = useState<{ hour: number; minutes: number; percentage: number } | null>(null);
+
+  useEffect(() => {
+    if (!show) return;
+
+    const updateTime = () => {
+      const now = new Date();
+      const hour = now.getHours();
+      const minutes = now.getMinutes();
+      
+      // Only show indicator during working hours (7 AM - 11 PM)
+      if (hour >= 7 && hour < 23) {
+        const percentage = ((hour - 7) * 60 + minutes) / (16 * 60) * 100;
+        setCurrentTime({ hour, minutes, percentage });
+      } else {
+        setCurrentTime(null);
+      }
+    };
+
+    updateTime();
+    const interval = setInterval(updateTime, 60000); // Update every minute
+
+    return () => clearInterval(interval);
+  }, [show]);
+
+  if (!currentTime) return null;
+
   return (
     <div
-      draggable
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        top: `${currentTime.percentage}%`,
+        height: 2,
+        background: "#dc2626",
+        zIndex: 10,
+        boxShadow: "0 0 2px rgba(220, 38, 38, 0.5)",
+        transition: "top 0.5s ease-in-out",
+      }}
+    />
+  );
+}
+
+// ─── Components ───────────────────────────────────────────────────────────────
+
+function EventPill({ event, onClick, style, compact = false, onDragStart, onDragEnd, onResizeStart }: EventPillProps & { onDragStart?: (e: React.DragEvent) => void; onDragEnd?: () => void; onResizeStart?: (e: React.MouseEvent, mode: "top" | "bottom") => void }) {
+  const c = EVENT_COLORS[event.colorIdx ?? 0];
+  const dur = toMin(event.endTime) - toMin(event.startTime);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const handleResizeStart = (e: React.MouseEvent, mode: "top" | "bottom") => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+    onResizeStart?.(e, mode);
+  };
+
+  return (
+    <div
+      draggable={!isResizing}
       onClick={() => onClick(event)}
       onDragStart={(e) => {
         e.dataTransfer!.effectAllowed = "move";
@@ -278,11 +359,36 @@ function EventPill({ event, onClick, style, compact = false, onDragStart, onDrag
         background: c.bg, color: "#fff", borderRadius: 6,
         padding: compact ? "2px 6px" : "4px 8px",
         cursor: "grab", overflow: "hidden", userSelect: "none",
-        fontSize: 12, lineHeight: 1.3, boxSizing: "border-box", ...style,
+        fontSize: 12, lineHeight: 1.3, boxSizing: "border-box", position: "relative", ...style,
       }}
       onMouseDown={(e) => e.currentTarget.style.cursor = "grabbing"}
       onMouseUp={(e) => e.currentTarget.style.cursor = "grab"}
     >
+      {/* Resize handle at the top of the event */}
+      {!compact && (
+        <div
+          onMouseDown={(e) => handleResizeStart(e, "top")}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 4,
+            cursor: "row-resize",
+            background: "rgba(255, 255, 255, 0.3)",
+            borderRadius: "6px 6px 0 0",
+            transition: "background 0.2s",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLDivElement).style.background = "rgba(255, 255, 255, 0.6)";
+          }}
+          onMouseLeave={(e) => {
+            if (!isResizing) {
+              (e.currentTarget as HTMLDivElement).style.background = "rgba(255, 255, 255, 0.3)";
+            }
+          }}
+        />
+      )}
       <div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {event.title}
       </div>
@@ -291,17 +397,121 @@ function EventPill({ event, onClick, style, compact = false, onDragStart, onDrag
           {event.startTime} – {event.endTime}
         </div>
       )}
+      {/* Resize handle at the bottom of the event */}
+      {!compact && (
+        <div
+          onMouseDown={(e) => handleResizeStart(e, "bottom")}
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: 4,
+            cursor: "row-resize",
+            background: "rgba(255, 255, 255, 0.3)",
+            borderRadius: "0 0 6px 6px",
+            transition: "background 0.2s",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLDivElement).style.background = "rgba(255, 255, 255, 0.6)";
+          }}
+          onMouseLeave={(e) => {
+            if (!isResizing) {
+              (e.currentTarget as HTMLDivElement).style.background = "rgba(255, 255, 255, 0.3)";
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function DayColumn({ day, events, onSlotClick, onEventClick, onDragStart, onDragEnd, onEventDrop }: DayColumnProps & { onDragStart?: (e: React.DragEvent) => void; onDragEnd?: () => void; onEventDrop?: (event: CalendarEvent, targetHour: number) => void }) {
+function DayColumn({ day, events, onSlotClick, onEventClick, onDragStart, onDragEnd, onEventDrop, onEventResize, colors }: DayColumnProps & { onDragStart?: (e: React.DragEvent) => void; onDragEnd?: () => void; onEventDrop?: (event: CalendarEvent, targetHour: number) => void; onEventResize?: (event: CalendarEvent, newTime: string, mode: "start" | "end") => void }) {
   const SLOT_H = 48;
   const START_HOUR = 7;
   const [dragOverHour, setDragOverHour] = useState<number | null>(null);
+  const [resizingEvent, setResizingEvent] = useState<string | null>(null);
+  const [resizeStartY, setResizeStartY] = useState<number>(0);
+  const [resizeMode, setResizeMode] = useState<"top" | "bottom" | null>(null);
+  const dayContainerRef = useRef<HTMLDivElement>(null);
+
+  // Fallback colors if not provided
+  const defaultColors = {
+    border: "#e0e0e0",
+    lightBorder: "#f0f0f0",
+    dragOverBg: "#e8f0ff",
+    hoverBg: "#f8f9ff",
+  };
+  const colorScheme = colors || defaultColors;
+
+  useEffect(() => {
+    if (!resizingEvent || !dayContainerRef.current || !resizeMode) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const container = dayContainerRef.current;
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+      const currentY = e.clientY - rect.top;
+      const deltaY = currentY - resizeStartY;
+      
+      const event = events.find((evt) => evt.id === resizingEvent);
+      if (!event) return;
+
+      const startMin = toMin(event.startTime);
+      const endMin = toMin(event.endTime);
+      const deltaMinutes = Math.round((deltaY / SLOT_H) * 60);
+
+      if (resizeMode === "bottom") {
+        // Resize end time
+        let newEndMin = endMin + deltaMinutes;
+        newEndMin = Math.max(startMin + 30, Math.min(newEndMin, 23 * 60 + 59));
+
+        const newEndHours = Math.floor(newEndMin / 60);
+        const newEndMins = newEndMin % 60;
+        const newEndTime = `${String(newEndHours).padStart(2, '0')}:${String(newEndMins).padStart(2, '0')}`;
+        onEventResize?.(event, newEndTime, "end");
+      } else if (resizeMode === "top") {
+        // Resize start time
+        let newStartMin = startMin + deltaMinutes;
+        newStartMin = Math.max(7 * 60, Math.min(newStartMin, endMin - 30));
+
+        const newStartHours = Math.floor(newStartMin / 60);
+        const newStartMins = newStartMin % 60;
+        const newStartTime = `${String(newStartHours).padStart(2, '0')}:${String(newStartMins).padStart(2, '0')}`;
+        onEventResize?.(event, newStartTime, "start");
+      }
+
+      setResizeStartY(currentY);
+    };
+
+    const handleMouseUp = () => {
+      setResizingEvent(null);
+      setResizeMode(null);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizingEvent, resizeStartY, resizeMode, events, onEventResize]);
+
+  const handleResizeStart = (event: CalendarEvent, e: React.MouseEvent, mode: "top" | "bottom") => {
+    setResizingEvent(event.id);
+    setResizeMode(mode);
+    setResizeStartY(e.clientY - (dayContainerRef.current?.getBoundingClientRect().top || 0));
+  };
+
+  const isToday = isSameDay(day, new Date());
 
   return (
-    <div style={{ flex: 1, minWidth: 0, position: "relative", borderLeft: "1px solid #e0e0e0" }}>
+    <div ref={dayContainerRef} style={{ flex: 1, minWidth: 0, position: "relative", borderLeft: `1px solid ${colorScheme.border}` }}>
+      <CurrentTimeIndicator show={isToday} />
       {WORKING_HOURS.map((hour) => (
         <div
           key={hour}
@@ -310,11 +520,11 @@ function DayColumn({ day, events, onSlotClick, onEventClick, onDragStart, onDrag
             e.preventDefault();
             e.dataTransfer!.dropEffect = "move";
             setDragOverHour(hour);
-            (e.currentTarget as HTMLDivElement).style.background = "#e8f0ff";
+            (e.currentTarget as HTMLDivElement).style.background = colorScheme.dragOverBg;
           }}
           onDragLeave={(e) => {
             setDragOverHour(null);
-            (e.currentTarget as HTMLDivElement).style.background = "#f8f9ff";
+            (e.currentTarget as HTMLDivElement).style.background = colorScheme.hoverBg;
           }}
           onDrop={(e) => {
             e.preventDefault();
@@ -336,9 +546,9 @@ function DayColumn({ day, events, onSlotClick, onEventClick, onDragStart, onDrag
               console.error("Drop failed:", err);
             }
           }}
-          style={{ height: SLOT_H, borderBottom: "1px solid #f0f0f0", boxSizing: "border-box", cursor: "pointer", background: dragOverHour === hour ? "#e8f0ff" : "" }}
-          onMouseEnter={(e) => { if (dragOverHour !== hour) (e.currentTarget as HTMLDivElement).style.background = "#f8f9ff"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = dragOverHour === hour ? "#e8f0ff" : ""; }}
+          style={{ height: SLOT_H, borderBottom: `1px solid ${colorScheme.lightBorder}`, boxSizing: "border-box", cursor: "pointer", background: dragOverHour === hour ? colorScheme.dragOverBg : "" }}
+          onMouseEnter={(e) => { if (dragOverHour !== hour) (e.currentTarget as HTMLDivElement).style.background = colorScheme.hoverBg; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = dragOverHour === hour ? colorScheme.dragOverBg : ""; }}
         />
       ))}
       {events.map((evt) => {
@@ -354,6 +564,7 @@ function DayColumn({ day, events, onSlotClick, onEventClick, onDragStart, onDrag
             compact={false}
             onDragStart={onDragStart}
             onDragEnd={() => onDragEnd?.()}
+            onResizeStart={(e, mode) => handleResizeStart(evt, e, mode)}
             style={{ position: "absolute", left: 2, right: 2, top: topOffset, height, zIndex: 1 }}
           />
         );
@@ -362,8 +573,14 @@ function DayColumn({ day, events, onSlotClick, onEventClick, onDragStart, onDrag
   );
 }
 
-function WeekGrid({ weekDays, events, onSlotClick, onEventClick, today }: WeekGridProps) {
+function WeekGrid({ weekDays, events, onSlotClick, onEventClick, today, onEventDrop, onEventResize, colors }: WeekGridProps & { onEventDrop?: (event: CalendarEvent, targetHour: number) => void; onEventResize?: (event: CalendarEvent, newTime: string, mode: "start" | "end") => void }) {
   const SLOT_H = 48;
+  
+  // Fallback colors if not provided
+  const defaultColors = {
+    border: "#e0e0e0",
+  };
+  const colorScheme = colors || defaultColors;
   return (
     <div style={{ display: "flex", flex: 1, overflow: "auto", position: "relative" }}>
       <div style={{ width: 56, flexShrink: 0 }}>
@@ -375,11 +592,11 @@ function WeekGrid({ weekDays, events, onSlotClick, onEventClick, today }: WeekGr
         ))}
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <div style={{ display: "flex", borderBottom: "1px solid #e0e0e0", height: 20 }}>
+        <div style={{ display: "flex", borderBottom: `1px solid ${colorScheme.border}`, height: 20 }}>
           {weekDays.map((day) => {
             const dayIsToday = isSameDay(day, today);
             return (
-              <div key={day.toISOString()} style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", gap: 4, borderLeft: "1px solid #e0e0e0" }}>
+              <div key={day.toISOString()} style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", gap: 4, borderLeft: `1px solid ${colorScheme.border}` }}>
                 <span style={{ fontSize: 11, color: dayIsToday ? "#1a73e8" : "#70757a" }}>{format(day, "EEE").toUpperCase()}</span>
                 <div style={{ width: 22, height: 22, borderRadius: "50%", background: dayIsToday ? "#1a73e8" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <span style={{ fontSize: 12, fontWeight: dayIsToday ? 700 : 400, color: dayIsToday ? "#fff" : "#3c4043" }}>{format(day, "d")}</span>
@@ -400,6 +617,9 @@ function WeekGrid({ weekDays, events, onSlotClick, onEventClick, today }: WeekGr
                 onSlotClick={onSlotClick}
                 onEventClick={onEventClick}
                 isToday={isSameDay(day, today)}
+                onEventDrop={onEventDrop}
+                onEventResize={onEventResize}
+                colors={colors}
               />
             );
           })}
@@ -409,11 +629,22 @@ function WeekGrid({ weekDays, events, onSlotClick, onEventClick, today }: WeekGr
   );
 }
 
-function MonthGrid({ monthDays, selectedDate, events, onDayClick, today }: MonthGridProps) {
+function MonthGrid({ monthDays, selectedDate, events, onDayClick, today, colors }: MonthGridProps) {
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  
+  // Fallback colors if not provided
+  const defaultColors = {
+    border: "#e0e0e0",
+    lightBorder: "#f0f0f0",
+    selectedBg: "#e8f0fe",
+    background: "#fff",
+    hoverBg: "#f8f9ff",
+  };
+  const colorScheme = colors || defaultColors;
+  
   return (
     <div style={{ flex: 1, overflow: "auto" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: "1px solid #e0e0e0" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: `1px solid ${colorScheme.border}` }}>
         {DAYS.map((d) => (
           <div key={d} style={{ padding: "8px 0", textAlign: "center", fontSize: 11, fontWeight: 500, color: "#70757a" }}>{d}</div>
         ))}
@@ -429,9 +660,9 @@ function MonthGrid({ monthDays, selectedDate, events, onDayClick, today }: Month
             <div
               key={day.toISOString()}
               onClick={() => onDayClick(day)}
-              style={{ border: "1px solid #f0f0f0", padding: "4px 6px", cursor: "pointer", overflow: "hidden", background: isSel ? "#e8f0fe" : "white" }}
-              onMouseEnter={(e) => { if (!isSel) (e.currentTarget as HTMLDivElement).style.background = "#fafafa"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = isSel ? "#e8f0fe" : "white"; }}
+              style={{ border: `1px solid ${colorScheme.lightBorder}`, padding: "4px 6px", cursor: "pointer", overflow: "hidden", background: isSel ? colorScheme.selectedBg : colorScheme.background }}
+              onMouseEnter={(e) => { if (!isSel) (e.currentTarget as HTMLDivElement).style.background = colorScheme.hoverBg; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = isSel ? colorScheme.selectedBg : colorScheme.background; }}
             >
               <div style={{ display: "flex", justifyContent: "center", marginBottom: 2 }}>
                 <div style={{ width: 24, height: 24, borderRadius: "50%", background: dayIsToday ? "#1a73e8" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -452,23 +683,32 @@ function MonthGrid({ monthDays, selectedDate, events, onDayClick, today }: Month
   );
 }
 
-function MiniCalendar({ value, onChange }: MiniCalendarProps) {
+function MiniCalendar({ value, onChange, colors }: MiniCalendarProps) {
   const [month, setMonth] = useState<Date>(new Date(value));
   const monthStart = startOfMonth(month);
   const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
   const days = Array.from({ length: 42 }, (_, i) => addDays(calStart, i));
   const today = new Date();
+  
+  // Fallback colors if not provided
+  const defaultColors = {
+    secondaryText: "#70757a",
+    text: "#3c4043",
+    accentColor: "#1a73e8",
+    dragOverBg: "#e8f0fe",
+  };
+  const colorScheme = colors || defaultColors;
 
   return (
     <div style={{ padding: "8px 12px", userSelect: "none" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-        <button onClick={() => setMonth(subMonths(month, 1))} style={{ background: "none", border: "none", cursor: "pointer", color: "#70757a", fontSize: 16, padding: "2px 6px" }}>‹</button>
-        <span style={{ fontSize: 13, fontWeight: 500, color: "#3c4043" }}>{format(month, "MMMM yyyy")}</span>
-        <button onClick={() => setMonth(addMonths(month, 1))} style={{ background: "none", border: "none", cursor: "pointer", color: "#70757a", fontSize: 16, padding: "2px 6px" }}>›</button>
+        <button onClick={() => setMonth(subMonths(month, 1))} style={{ background: "none", border: "none", cursor: "pointer", color: colorScheme.secondaryText, fontSize: 16, padding: "2px 6px" }}>‹</button>
+        <span style={{ fontSize: 13, fontWeight: 500, color: colorScheme.text }}>{format(month, "MMMM yyyy")}</span>
+        <button onClick={() => setMonth(addMonths(month, 1))} style={{ background: "none", border: "none", cursor: "pointer", color: colorScheme.secondaryText, fontSize: 16, padding: "2px 6px" }}>›</button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 28px)", gap: 0, justifyContent: "center" }}>
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-          <div key={i} style={{ textAlign: "center", fontSize: 11, color: "#70757a", height: 24, display: "flex", alignItems: "center", justifyContent: "center" }}>{d}</div>
+          <div key={i} style={{ textAlign: "center", fontSize: 11, color: colorScheme.secondaryText, height: 24, display: "flex", alignItems: "center", justifyContent: "center" }}>{d}</div>
         ))}
         {days.map((day) => {
           const isToday = isSameDay(day, today);
@@ -481,8 +721,8 @@ function MiniCalendar({ value, onChange }: MiniCalendarProps) {
               style={{
                 width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
                 cursor: "pointer", fontSize: 12,
-                background: isSel ? "#1a73e8" : isToday ? "#e8f0fe" : "transparent",
-                color: isSel ? "#fff" : isToday ? "#1a73e8" : inMonth ? "#3c4043" : "#c5c5c5",
+                background: isSel ? colorScheme.accentColor : isToday ? colorScheme.dragOverBg : "transparent",
+                color: isSel ? "#fff" : isToday ? colorScheme.accentColor : inMonth ? colorScheme.text : colorScheme.secondaryText,
                 fontWeight: isSel || isToday ? 600 : 400,
               }}
             >{format(day, "d")}</div>
@@ -754,6 +994,23 @@ function EventModal({ event, onClose, onSave, onDelete, mode, user }: EventModal
 
 export default function CalendarViewPage({ user }: CalendarViewPageProps) {
   const { toast } = useToast();
+  const { isDark } = useTheme();
+  
+  // Theme-aware colors
+  const colors = {
+    background: isDark ? "#1a1a1a" : "#fff",
+    text: isDark ? "#ffffff" : "#3c4043",
+    secondaryText: isDark ? "#b0b0b0" : "#70757a",
+    border: isDark ? "#404040" : "#e0e0e0",
+    lightBorder: isDark ? "#333333" : "#f0f0f0",
+    hoverBg: isDark ? "#2a2a2a" : "#f8f9ff",
+    dragOverBg: isDark ? "#1f3a7a" : "#e8f0ff",
+    selectedBg: isDark ? "#1f2a5c" : "#e8f0fe",
+    buttonBg: isDark ? "#303030" : "#fff",
+    buttonBorder: isDark ? "#555555" : "#dadce0",
+    accentColor: "#1a73e8",
+  };
+  
   const today = new Date();
   const [selectedDate, setSelectedDate] = useState<Date>(today);
   const [viewMode, setViewMode] = useState<ViewMode>("day");
@@ -871,9 +1128,21 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
       return;
     }
 
-    const durationMinutes = toMin(draggedEvent.endTime) - toMin(draggedEvent.startTime);
+    // Get events on the target day to calculate available slot
+    const targetDate = draggedEvent.date;
+    const dayEventsOnTarget = events.filter((e) => e.date === targetDate && e.id !== draggedEvent.id);
+    
+    // Calculate available slot duration at the target time
+    const availableMinutes = getAvailableSlotDuration(targetHour, dayEventsOnTarget);
+    
+    // Get the original task duration
+    const originalDurationMinutes = toMin(draggedEvent.endTime) - toMin(draggedEvent.startTime);
+    
+    // Use the smaller of: original duration or available slot
+    const newDurationMinutes = Math.min(originalDurationMinutes, availableMinutes);
+    
     const newStartMinutes = targetHour * 60;
-    const newEndMinutes = Math.min(23 * 60 + 59, newStartMinutes + durationMinutes);
+    const newEndMinutes = Math.min(23 * 60 + 59, newStartMinutes + newDurationMinutes);
     
     const newStartTime = `${String(targetHour).padStart(2, '0')}:00`;
     const newEndHours = Math.floor(newEndMinutes / 60);
@@ -887,6 +1156,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
     };
 
     console.log(`Updated event:`, updatedEvent);
+    console.log(`Original duration: ${originalDurationMinutes} mins, Available slot: ${availableMinutes} mins, New duration: ${newDurationMinutes} mins`);
     console.log(`Updated event has googleEventId: ${updatedEvent.googleEventId}`);
     const updatedEvents = events.map((e) => (e.id === draggedEvent.id ? updatedEvent : e));
     setEvents(updatedEvents);
@@ -902,11 +1172,84 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
 
     syncEventToTimeEntry(updatedEvent);
 
+    const durationChangeMsg = newDurationMinutes < originalDurationMinutes 
+      ? ` (duration adjusted from ${originalDurationMinutes} to ${newDurationMinutes} minutes to fit available slot)` 
+      : "";
+    
     toast({
       title: "✅ Event Moved",
-      description: `${updatedEvent.title} moved to ${newStartTime}–${newEndTime}`,
+      description: `${updatedEvent.title} moved to ${newStartTime}–${newEndTime}${durationChangeMsg}`,
     });
     console.log(`Event drop completed`);
+  };
+
+  const handleEventResize = (event: CalendarEvent, newTime: string, mode: "start" | "end" = "end"): void => {
+    const startMin = toMin(event.startTime);
+    const endMin = toMin(event.endTime);
+
+    let updatedEvent: CalendarEvent;
+
+    if (mode === "end") {
+      const newEndMin = toMin(newTime);
+
+      // Validate: minimum 30 minutes
+      if (newEndMin - startMin < 30) {
+        toast({
+          title: "⚠️ Invalid Duration",
+          description: "Task duration must be at least 30 minutes",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      updatedEvent = {
+        ...event,
+        endTime: newTime,
+      };
+
+      syncEventToTimeEntry(updatedEvent);
+
+      const newDurationMinutes = newEndMin - startMin;
+      toast({
+        title: "✅ Event Resized",
+        description: `${updatedEvent.title} resized to ${newDurationMinutes} minutes (${event.startTime}–${newTime})`,
+      });
+    } else {
+      // mode === "start"
+      const newStartMin = toMin(newTime);
+
+      // Validate: minimum 30 minutes
+      if (endMin - newStartMin < 30) {
+        toast({
+          title: "⚠️ Invalid Duration",
+          description: "Task duration must be at least 30 minutes",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      updatedEvent = {
+        ...event,
+        startTime: newTime,
+      };
+
+      syncEventToTimeEntry(updatedEvent);
+
+      const newDurationMinutes = endMin - newStartMin;
+      toast({
+        title: "✅ Event Resized",
+        description: `${updatedEvent.title} resized to ${newDurationMinutes} minutes (${newTime}–${event.endTime})`,
+      });
+    }
+
+    const updatedEvents = events.map((e) => (e.id === event.id ? updatedEvent : e));
+    setEvents(updatedEvents);
+
+    if (updatedEvent.source === "manual") {
+      persistManualEvents(user?.id, updatedEvents.filter((e) => e.source === "manual"));
+    } else if (updatedEvent.source === "plan") {
+      persistPlanUpdate(user?.id, updatedEvent.date, updatedEvent);
+    }
   };
 
   const connectGoogleCalendar = async () => {
@@ -1071,43 +1414,43 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
         : format(selectedDate, "EEEE, MMMM d, yyyy");
 
   return (
-    <div style={{ display: "flex", height: "100vh", fontFamily: "'Google Sans', Roboto, sans-serif", background: "#fff", color: "#3c4043", overflow: "hidden" }}>
+    <div style={{ display: "flex", height: "100vh", fontFamily: "'Google Sans', Roboto, sans-serif", background: colors.background, color: colors.text, overflow: "hidden" }}>
       {/* Sidebar */}
       {sidebarOpen && (
-        <div style={{ width: 256, borderRight: "1px solid #e0e0e0", display: "flex", flexDirection: "column", flexShrink: 0, overflowY: "auto" }}>
+        <div style={{ width: 256, borderRight: `1px solid ${colors.border}`, display: "flex", flexDirection: "column", flexShrink: 0, overflowY: "auto" }}>
           <div style={{ padding: "12px 16px" }}>
             <button
               onClick={() => openNew(today, 9)}
-              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px 10px 14px", border: "none", borderRadius: 24, background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.2)", cursor: "pointer", fontSize: 14, color: "#3c4043", fontWeight: 500 }}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px 10px 14px", border: "none", borderRadius: 24, background: colors.buttonBg, boxShadow: "0 1px 3px rgba(0,0,0,0.2)", cursor: "pointer", fontSize: 14, color: colors.text, fontWeight: 500 }}
             >
-              <span style={{ fontSize: 22, color: "#1a73e8", fontWeight: 300, lineHeight: 1 }}>+</span>
+              <span style={{ fontSize: 22, color: colors.accentColor, fontWeight: 300, lineHeight: 1 }}>+</span>
               Create
             </button>
           </div>
 
-          <MiniCalendar value={selectedDate} onChange={setSelectedDate} />
+          <MiniCalendar value={selectedDate} onChange={setSelectedDate} colors={colors} />
 
           <div style={{ padding: "8px 16px" }}>
             <input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search events…"
-              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 20, padding: "7px 14px", fontSize: 13, outline: "none", color: "#3c4043" }}
+              style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${colors.border}`, borderRadius: 20, padding: "7px 14px", fontSize: 13, outline: "none", color: colors.text, background: colors.background }}
             />
           </div>
 
-          <div style={{ padding: "8px 16px", borderTop: "1px solid #e0e0e0", marginTop: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "#70757a", marginBottom: 8, letterSpacing: "0.05em" }}>GOOGLE CALENDAR</div>
-            <div style={{ fontSize: 12, color: "#3c4043", marginBottom: 8, lineHeight: 1.4 }}>{googleStatus}</div>
+          <div style={{ padding: "8px 16px", borderTop: `1px solid ${colors.border}`, marginTop: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: colors.secondaryText, marginBottom: 8, letterSpacing: "0.05em" }}>GOOGLE CALENDAR</div>
+            <div style={{ fontSize: 12, color: colors.text, marginBottom: 8, lineHeight: 1.4 }}>{googleStatus}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <button
                 onClick={googleConnected ? disconnectGoogleCalendar : connectGoogleCalendar}
                 disabled={!user?.id}
                 style={{
-                  border: "1px solid #dadce0",
+                  border: `1px solid ${colors.buttonBorder}`,
                   borderRadius: 6,
-                  background: googleConnected ? "#fff" : "#1a73e8",
-                  color: googleConnected ? "#3c4043" : "#fff",
+                  background: googleConnected ? colors.buttonBg : colors.accentColor,
+                  color: googleConnected ? colors.text : "#fff",
                   padding: "8px 12px",
                   cursor: user?.id ? "pointer" : "not-allowed",
                   fontSize: 13,
@@ -1121,10 +1464,10 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
                 onClick={syncGoogleCalendar}
                 disabled={!googleConnected || googleSyncing}
                 style={{
-                  border: "1px solid #dadce0",
+                  border: `1px solid ${colors.buttonBorder}`,
                   borderRadius: 6,
-                  background: googleConnected ? "#0f9d58" : "#f1f3f4",
-                  color: googleConnected ? "#fff" : "#70757a",
+                  background: googleConnected ? "#0f9d58" : colors.hoverBg,
+                  color: googleConnected ? "#fff" : colors.secondaryText,
                   padding: "8px 12px",
                   cursor: googleConnected && !googleSyncing ? "pointer" : "not-allowed",
                   fontSize: 13,
@@ -1139,7 +1482,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
                   alignItems: "center",
                   gap: 8,
                   fontSize: 13,
-                  color: "#3c4043",
+                  color: colors.text,
                   cursor: googleConnected ? "pointer" : "not-allowed",
                   opacity: googleConnected ? 1 : 0.5,
                   padding: "4px 0",
@@ -1150,15 +1493,15 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
                   checked={autoSync}
                   onChange={(e) => setAutoSync(e.target.checked)}
                   disabled={!googleConnected}
-                  style={{ accentColor: "#1a73e8", width: 16, height: 16 }}
+                  style={{ accentColor: colors.accentColor, width: 16, height: 16 }}
                 />
                 Auto-sync every 5 sec
               </label>
             </div>
           </div>
 
-          <div style={{ padding: "8px 16px", borderTop: "1px solid #e0e0e0", marginTop: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "#70757a", marginBottom: 8, letterSpacing: "0.05em" }}>MY CALENDARS</div>
+          <div style={{ padding: "8px 16px", borderTop: `1px solid ${colors.border}`, marginTop: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: colors.secondaryText, marginBottom: 8, letterSpacing: "0.05em" }}>MY CALENDARS</div>
             {["Work", "Personal", "Meetings", "Deadlines"].map((cal, i) => (
               <div key={cal} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13 }}>
                 <div style={{ width: 14, height: 14, borderRadius: 3, background: EVENT_COLORS[i].bg }} />
@@ -1185,31 +1528,31 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
       {/* Main area */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         {/* Top bar */}
-        <div style={{ display: "flex", alignItems: "center", height: 56, padding: "0 16px", borderBottom: "1px solid #e0e0e0", gap: 8, flexShrink: 0 }}>
-          <button onClick={() => setSidebarOpen((o) => !o)} style={{ background: "none", border: "none", cursor: "pointer", color: "#5f6368", fontSize: 20, padding: "6px", borderRadius: "50%", display: "flex" }}>☰</button>
+        <div style={{ display: "flex", alignItems: "center", height: 56, padding: "0 16px", borderBottom: `1px solid ${colors.border}`, gap: 8, flexShrink: 0 }}>
+          <button onClick={() => setSidebarOpen((o) => !o)} style={{ background: "none", border: "none", cursor: "pointer", color: colors.secondaryText, fontSize: 20, padding: "6px", borderRadius: "50%", display: "flex" }}>☰</button>
 
           <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
-            <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#1a73e8", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: 32, height: 32, borderRadius: "50%", background: colors.accentColor, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>📅</span>
             </div>
-            <span style={{ fontSize: 18, color: "#3c4043", fontWeight: 400 }}>Calendar</span>
+            <span style={{ fontSize: 18, color: colors.text, fontWeight: 400 }}>Calendar</span>
           </div>
 
-          <button onClick={() => setSelectedDate(today)} style={{ marginLeft: 16, padding: "6px 14px", border: "1px solid #dadce0", borderRadius: 6, background: "#fff", cursor: "pointer", fontSize: 13, color: "#3c4043" }}>Today</button>
-          <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", cursor: "pointer", color: "#5f6368", fontSize: 20, padding: "4px 6px" }}>‹</button>
-          <button onClick={() => navigate(1)} style={{ background: "none", border: "none", cursor: "pointer", color: "#5f6368", fontSize: 20, padding: "4px 6px" }}>›</button>
+          <button onClick={() => setSelectedDate(today)} style={{ marginLeft: 16, padding: "6px 14px", border: `1px solid ${colors.buttonBorder}`, borderRadius: 6, background: colors.buttonBg, cursor: "pointer", fontSize: 13, color: colors.text }}>Today</button>
+          <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", cursor: "pointer", color: colors.secondaryText, fontSize: 20, padding: "4px 6px" }}>‹</button>
+          <button onClick={() => navigate(1)} style={{ background: "none", border: "none", cursor: "pointer", color: colors.secondaryText, fontSize: 20, padding: "4px 6px" }}>›</button>
 
-          <h2 style={{ fontSize: 20, fontWeight: 400, color: "#3c4043", margin: 0, flex: 1 }}>{headerLabel}</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 400, color: colors.text, margin: 0, flex: 1 }}>{headerLabel}</h2>
 
-          <div style={{ display: "flex", border: "1px solid #dadce0", borderRadius: 6, overflow: "hidden" }}>
+          <div style={{ display: "flex", border: `1px solid ${colors.buttonBorder}`, borderRadius: 6, overflow: "hidden" }}>
             {(["day", "week", "month"] as ViewMode[]).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
                 style={{
                   padding: "6px 14px", border: "none", cursor: "pointer", fontSize: 13,
-                  background: viewMode === mode ? "#e8f0fe" : "#fff",
-                  color: viewMode === mode ? "#1a73e8" : "#3c4043",
+                  background: viewMode === mode ? colors.dragOverBg : colors.buttonBg,
+                  color: viewMode === mode ? colors.accentColor : colors.text,
                   fontWeight: viewMode === mode ? 600 : 400,
                   borderRight: mode !== "month" ? "1px solid #dadce0" : "none",
                 }}
@@ -1221,7 +1564,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
         {/* Calendar body */}
         <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
           {viewMode === "week" && (
-            <WeekGrid weekDays={weekDays} events={filteredEvents} onSlotClick={openNew} onEventClick={openEdit} today={today} />
+            <WeekGrid weekDays={weekDays} events={filteredEvents} onSlotClick={openNew} onEventClick={openEdit} today={today} onEventDrop={handleEventDrop} onEventResize={handleEventResize} colors={colors} />
           )}
 
           {viewMode === "day" && (
@@ -1230,15 +1573,15 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
                 <div style={{ height: 40 }} />
                 {WORKING_HOURS.map((h) => (
                   <div key={h} style={{ height: 48, display: "flex", alignItems: "flex-start", justifyContent: "flex-end", paddingRight: 8 }}>
-                    <span style={{ fontSize: 11, color: "#70757a", marginTop: -6 }}>{fmtHour(h)}</span>
+                    <span style={{ fontSize: 11, color: colors.secondaryText, marginTop: -6 }}>{fmtHour(h)}</span>
                   </div>
                 ))}
               </div>
               <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-                <div style={{ height: 40, borderBottom: "1px solid #e0e0e0", display: "flex", alignItems: "center", paddingLeft: 16, gap: 8 }}>
-                  <span style={{ fontSize: 13, color: isSameDay(selectedDate, today) ? "#1a73e8" : "#70757a" }}>{format(selectedDate, "EEE").toUpperCase()}</span>
-                  <div style={{ width: 32, height: 32, borderRadius: "50%", background: isSameDay(selectedDate, today) ? "#1a73e8" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <span style={{ fontWeight: isSameDay(selectedDate, today) ? 700 : 400, color: isSameDay(selectedDate, today) ? "#fff" : "#3c4043" }}>{format(selectedDate, "d")}</span>
+                <div style={{ height: 40, borderBottom: `1px solid ${colors.border}`, display: "flex", alignItems: "center", paddingLeft: 16, gap: 8 }}>
+                  <span style={{ fontSize: 13, color: isSameDay(selectedDate, today) ? colors.accentColor : colors.secondaryText }}>{format(selectedDate, "EEE").toUpperCase()}</span>
+                  <div style={{ width: 32, height: 32, borderRadius: "50%", background: isSameDay(selectedDate, today) ? colors.accentColor : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <span style={{ fontWeight: isSameDay(selectedDate, today) ? 700 : 400, color: isSameDay(selectedDate, today) ? "#fff" : colors.text }}>{format(selectedDate, "d")}</span>
                   </div>
                 </div>
                 <DayColumn
@@ -1247,14 +1590,16 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
                   onSlotClick={openNew}
                   onEventClick={openEdit}
                   onEventDrop={handleEventDrop}
+                  onEventResize={handleEventResize}
                   isToday={isSameDay(selectedDate, today)}
+                  colors={colors}
                 />
               </div>
             </div>
           )}
 
           {viewMode === "month" && (
-            <MonthGrid monthDays={monthDays} selectedDate={selectedDate} events={filteredEvents} onDayClick={setSelectedDate} today={today} />
+            <MonthGrid monthDays={monthDays} selectedDate={selectedDate} events={filteredEvents} onDayClick={setSelectedDate} today={today} colors={colors} />
           )}
         </div>
       </div>

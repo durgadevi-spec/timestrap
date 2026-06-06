@@ -1,7 +1,8 @@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { LogOut, Menu, Calendar, Sun, Moon } from 'lucide-react';
+import { LogOut, Menu, Calendar, Sun, Moon, ExternalLink } from 'lucide-react';
 import { User, UserRole } from '@/context/AuthContext';
+import { useTheme } from '@/context/ThemeContext';
 import logoImage from '@assets/WhatsApp_Image_2025-11-11_at_11.06.02_AM_1765464690595.jpeg';
 import AlertsPopover from './AlertsPopover';
 
@@ -38,6 +39,8 @@ export default function AppHeader({
   onDateChange,
   showDatePicker = false
 }: AppHeaderProps) {
+  const { isDark, toggleTheme } = useTheme();
+  
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('en-IN', {
       weekday: 'long',
@@ -109,25 +112,27 @@ export default function AppHeader({
         <Button 
           size="icon" 
           variant="ghost" 
-          onClick={() => {
-            const isDark = document.documentElement.style.filter === '';
-            if (isDark) {
-              document.documentElement.style.filter = 'invert(1) hue-rotate(180deg)';
-              const style = document.createElement('style');
-              style.id = 'theme-inversion';
-              style.innerHTML = 'img, video { filter: invert(1) hue-rotate(180deg); }';
-              document.head.appendChild(style);
-            } else {
-              document.documentElement.style.filter = '';
-              const style = document.getElementById('theme-inversion');
-              if (style) style.remove();
-            }
-          }}
+          onClick={() => window.open('http://147.93.28.144:5002/', '_blank')}
+          className="text-slate-400 hover:text-white"
+          title="Go to PMS"
+          data-testid="button-go-to-pms"
+        >
+          <ExternalLink className="w-5 h-5" />
+        </Button>
+        
+        <Button 
+          size="icon" 
+          variant="ghost" 
+          onClick={toggleTheme}
           className="text-slate-400 hover:text-white"
           title="Toggle Theme"
+          data-testid="button-toggle-theme"
         >
-          <Sun className="w-5 h-5 hidden dark-filter-visible:block" />
-          <Moon className="w-5 h-5 block dark-filter-visible:hidden" />
+          {isDark ? (
+            <Moon className="w-5 h-5" />
+          ) : (
+            <Sun className="w-5 h-5" />
+          )}
         </Button>
         
         <Button 

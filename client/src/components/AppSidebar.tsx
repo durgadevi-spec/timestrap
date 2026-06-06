@@ -28,6 +28,7 @@ import {
   ClipboardCheck,
   UserX,
   CalendarDays,
+  ExternalLink,
 } from 'lucide-react';
 import { UserRole } from '@/context/AuthContext';
 import logoImage from '@assets/WhatsApp_Image_2025-11-11_at_11.06.02_AM_1765464690595.jpeg';
@@ -61,6 +62,7 @@ export default function AppSidebar({ userRole, pendingApprovals = 0, pendingReje
     { title: 'Users', url: '/users', icon: UserPlus, roles: ['admin'] as UserRole[] },
     { title: 'Administration', url: '/admin', icon: Shield, roles: ['admin'] as UserRole[] },
     { title: 'Postponements', url: '/admin/postponements', icon: CalendarClock, roles: ['admin'] as UserRole[] },
+    { title: 'Go to PMS', url: 'http://147.93.28.144:5002/', icon: ExternalLink, roles: ['employee', 'manager', 'hr', 'admin'] as UserRole[], external: true },
   ];
 
   const visibleItems = allMenuItems.filter(item => item.roles.includes(userRole));
@@ -92,6 +94,7 @@ export default function AppSidebar({ userRole, pendingApprovals = 0, pendingReje
             <SidebarMenu>
               {visibleItems.map((item) => {
                 const isActive = location === item.url;
+                const isExternal = (item as any).external || false;
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
@@ -102,19 +105,35 @@ export default function AppSidebar({ userRole, pendingApprovals = 0, pendingReje
                         } ${collapsed ? 'justify-center px-2' : 'px-3 py-2'}`}
                       tooltip={collapsed ? item.title : undefined}
                     >
-                      <Link href={item.url} data-testid={`nav-${item.title.toLowerCase()}`}>
-                        <item.icon className="w-4 h-4" />
-                        {!collapsed && (
-                          <>
-                            <span className="flex-1 ml-2 text-sm font-medium">{item.title}</span>
-                            {item.badge && item.badge > 0 && (
-                              <Badge className="bg-red-500 text-white text-xs h-5 min-w-5 flex items-center justify-center border-0">
-                                {item.badge}
-                              </Badge>
-                            )}
-                          </>
-                        )}
-                      </Link>
+                      {isExternal ? (
+                        <a href={item.url} target="_blank" rel="noopener noreferrer" data-testid={`nav-${item.title.toLowerCase()}`}>
+                          <item.icon className="w-4 h-4" />
+                          {!collapsed && (
+                            <>
+                              <span className="flex-1 ml-2 text-sm font-medium">{item.title}</span>
+                              {(item as any).badge && (item as any).badge > 0 && (
+                                <Badge className="bg-red-500 text-white text-xs h-5 min-w-5 flex items-center justify-center border-0">
+                                  {(item as any).badge}
+                                </Badge>
+                              )}
+                            </>
+                          )}
+                        </a>
+                      ) : (
+                        <Link href={item.url} data-testid={`nav-${item.title.toLowerCase()}`}>
+                          <item.icon className="w-4 h-4" />
+                          {!collapsed && (
+                            <>
+                              <span className="flex-1 ml-2 text-sm font-medium">{item.title}</span>
+                              {(item as any).badge && (item as any).badge > 0 && (
+                                <Badge className="bg-red-500 text-white text-xs h-5 min-w-5 flex items-center justify-center border-0">
+                                  {(item as any).badge}
+                                </Badge>
+                              )}
+                            </>
+                          )}
+                        </Link>
+                      )}
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );

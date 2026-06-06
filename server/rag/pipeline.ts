@@ -93,6 +93,17 @@ Notes: ${record.notes || "None"}.`;
     console.error(`Error ingesting webhook record for ${table}:`, error.message);
   } else {
     console.log(`Successfully ingested webhook record for ${table}: ${record.id}`);
+    if (table === "time_entries") {
+      try {
+        await pool.query(`
+          DELETE FROM document_embeddings
+          WHERE metadata->>'data_type' = 'timesheet'
+            AND created_at < NOW() - INTERVAL '90 days'
+        `);
+      } catch (err: any) {
+        console.error("Auto-cleanup timesheet embeddings error:", err.message);
+      }
+    }
   }
 }
 

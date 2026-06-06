@@ -1,8 +1,9 @@
-import type { Express } from "express";
+import express, { type Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket, WebSocket as WSWebSocket } from "ws";
 import { storage } from "./storage";
 import { promises as fs } from "fs";
+import fsSync from "fs";
 import path from "path";   // ✅ KEEP THIS
 import { pool } from "./db";
 import { pmsPool, saveSiteReportToPMS, getTasks, type PMSTask } from "./pmsSupabase";
@@ -150,6 +151,11 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Reports static folder
+  const reportsDir = path.join(process.cwd(), "reports");
+  if (!fsSync.existsSync(reportsDir)) fsSync.mkdirSync(reportsDir, { recursive: true });
+  app.use("/reports", express.static(reportsDir));
+
   // Initialize WebSocket server for real-time updates
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
@@ -161,6 +167,31 @@ export async function registerRoutes(
   // Seed managers and default employees on startup
   await storage.seedManagers();
   await storage.seedDefaultEmployees();
+
+  // Create Phase 5 tables if they don't exist
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_memories (
+      id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid(),
+      employee_id VARCHAR(255) NOT NULL,
+      memory_type VARCHAR(255) NOT NULL,
+      memory_key VARCHAR(255) NOT NULL,
+      memory_value JSONB NOT NULL,
+      usage_count INTEGER DEFAULT 1 NOT NULL,
+      last_used_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      CONSTRAINT ai_memories_employee_type_key_unique UNIQUE (employee_id, memory_type, memory_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid(),
+      employee_id VARCHAR(255) NOT NULL,
+      title TEXT NOT NULL,
+      messages JSONB NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `).catch(err => console.error("Error creating Phase 5 tables on startup:", err));
 
   // Register Google Calendar OAuth and sync routes
   registerGoogleCalendarRoutes(app);
@@ -2259,12 +2290,15 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
         });
 
         if (employee) {
-          const tStart = t.scheduleData?.startTime || t.startTime || "09:00";
-          const tEnd = t.scheduleData?.endTime || t.endTime || "10:00";
-          const [sh, sm] = tStart.split(':').map(Number);
-          const [eh, em] = tEnd.split(':').map(Number);
-          const diffMin = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
-          const totalHours = `${String(Math.floor(diffMin / 60)).padStart(2, '0')}:${String(diffMin % 60).padStart(2, '0')}`;
+          const tStart = t.scheduleData?.startTime || t.startTime || null;
+          const tEnd = t.scheduleData?.endTime || t.endTime || null;
+          let totalHours = '00:00';
+          if (tStart && tEnd) {
+            const [sh, sm] = tStart.split(':').map(Number);
+            const [eh, em] = tEnd.split(':').map(Number);
+            const diffMin = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+            totalHours = `${String(Math.floor(diffMin / 60)).padStart(2, '0')}:${String(diffMin % 60).padStart(2, '0')}`;
+          }
 
           const isBreak = t.isBreak || t.task_name?.toLowerCase().includes("break") || t.task_name?.toLowerCase().includes("lunch");
           
@@ -2768,6 +2802,11 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
         const taskKey = extractDatePart(task.end_date);
         const isTaskOverdue = taskKey ? taskKey < todayKey : false;
 
+        // Determine if task is assigned to current employee
+        const assignedTo = (task.assignee || (task as any).assigned_to || '').toString();
+        const taskMembers = Array.isArray((task as any).task_members) ? (task as any).task_members : [];
+        const isAssignedToEmployee = assignedTo === employee.employeeCode || taskMembers.includes(employee.employeeCode) || false;
+
         const isAutoSelected = shouldSyncPMSTask(task, todayKey);
 
         tasksWithProjects.push({
@@ -2780,6 +2819,8 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
           isProjectOverdue: isProjectOverdue || false,
           isTaskOverdue: isTaskOverdue || false,
           isOverdue: (isTaskOverdue || isProjectOverdue) ? true : false,
+          assignedTo: assignedTo || null,
+          isAssignedToEmployee: isAssignedToEmployee || false,
           source: "PMS",
           isLocked: isAutoSelected,
           isAutoSelected: isAutoSelected
@@ -3111,28 +3152,113 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
         }
       }
 
-      const { runRAGChat } = await import("./rag/ragChat");
+      const { runCoordinator } = await import("./rag/coordinator");
       const u = (req as any).user || {};
-      await runRAGChat(
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      await runCoordinator({
         message,
-        history || [],
-        {
+        userContext: {
           employeeId: u.employeeId || employeeId,
           employeeCode: u.employeeCode || employeeCode,
           role: u.role || role,
           department: u.department || department,
           lmsUserId: req.body.lmsUserId || u.employeeCode || employeeCode,
           employeeName: u.name || u.employeeName || req.body.employeeName || employeeName || "",
+          baseUrl,
         },
-        (chunk) => {
+        history: history || [],
+        onChunk: (chunk) => {
           res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-        }
-      );
+        },
+      });
     } catch (err: any) {
       console.error("RAG chat error:", err);
       res.write(`data: ${JSON.stringify({ type: "text", content: `\n⚠️ Error processing chat: ${err.message}` })}\n\n`);
     } finally {
       res.end();
+    }
+  });
+
+  // ── Route 1: Save or update a chat session ──────────────────
+  app.post("/api/chat-sessions", async (req, res) => {
+    try {
+      const { employeeId, sessionId, title, messages } = req.body;
+      if (!employeeId) return res.status(400).json({ error: "employeeId required" });
+
+      if (sessionId) {
+        // Update existing session
+        const updateTitle = title || (messages?.[0]?.content?.slice(0, 60) + "...") || "Chat";
+        await pool.query(
+          `UPDATE chat_sessions 
+           SET messages = $1, title = COALESCE(NULLIF($2,''), title), updated_at = NOW()
+           WHERE id = $3 AND employee_id = $4`,
+          [JSON.stringify(messages || []), updateTitle, sessionId, employeeId]
+        );
+        return res.json({ success: true, sessionId });
+      } else {
+        // Create new session
+        const autoTitle = messages?.[0]?.content?.slice(0, 60) || "New Chat";
+        const result = await pool.query(
+          `INSERT INTO chat_sessions (employee_id, title, messages)
+           VALUES ($1, $2, $3) RETURNING id`,
+          [employeeId, autoTitle, JSON.stringify(messages || [])]
+        );
+        return res.json({ success: true, sessionId: result.rows[0].id });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Route 2: Get all chat sessions for an employee ──────────
+  app.get("/api/chat-sessions/:employeeId", async (req, res) => {
+    try {
+      const { employeeId } = req.params;
+      const result = await pool.query(
+        `SELECT id, title, created_at, updated_at,
+                LEFT(messages::text, 200) as preview
+         FROM chat_sessions
+         WHERE employee_id = $1
+         ORDER BY updated_at DESC
+         LIMIT 50`,
+        [employeeId]
+      );
+      res.json({ sessions: result.rows });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Route 3: Get a single chat session with full messages ────
+  app.get("/api/chat-sessions/:employeeId/:sessionId", async (req, res) => {
+    try {
+      const { employeeId, sessionId } = req.params;
+      const result = await pool.query(
+        `SELECT id, title, messages, created_at, updated_at
+         FROM chat_sessions
+         WHERE id = $1 AND employee_id = $2`,
+        [sessionId, employeeId]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      res.json(result.rows[0]);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Route 4: Delete a chat session ──────────────────────────
+  app.delete("/api/chat-sessions/:employeeId/:sessionId", async (req, res) => {
+    try {
+      const { employeeId, sessionId } = req.params;
+      await pool.query(
+        `DELETE FROM chat_sessions WHERE id = $1 AND employee_id = $2`,
+        [sessionId, employeeId]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

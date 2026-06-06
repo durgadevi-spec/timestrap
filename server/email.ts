@@ -797,9 +797,17 @@ export async function sendDailyPlanSubmittedEmail(data: {
   const overdueUnselectedTasks = unselectedTasks.filter(t => t.isOverdue);
   const onTrackUnselectedTasks = unselectedTasks.filter(t => !t.isOverdue);
 
+  const formatDateTime = (dateStr?: string) => {
+    if (!dateStr) return '—';
+    const dt = new Date(dateStr);
+    return dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  };
+
   const generateTaskRow = (t: any, isUnselected: boolean = false) => {
     const progress = t.progress !== undefined ? `${t.progress}%` : '0%';
     const progressColor = t.progress === 100 ? '#16a34a' : t.progress && t.progress > 0 ? '#2563eb' : '#64748b';
+    const startTime = formatDateTime(t.start_date);
+    const endTime = formatDateTime(t.end_date);
     
     if (isUnselected) {
       return `
@@ -808,8 +816,8 @@ export async function sendDailyPlanSubmittedEmail(data: {
         <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-style:italic;color:#64748b;">${t.reason}</td>
         <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-weight:bold;color:${progressColor};text-align:center;">${progress}</td>
         <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;white-space:nowrap;font-size:12px;text-align:center;">
-          <div><span style="color:#94a3b8">Start:</span> ${t.start_date ? new Date(t.start_date).toLocaleDateString('en-IN') : '—'}</div>
-          <div><span style="color:#94a3b8">End:</span> ${t.end_date ? new Date(t.end_date).toLocaleDateString('en-IN') : '—'}</div>
+          <div><span style="color:#94a3b8">Start:</span> ${startTime}</div>
+          <div><span style="color:#94a3b8">End:</span> ${endTime}</div>
         </td>
         <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:bold;color:#d97706;">${new Date(t.newDueDate).toLocaleDateString('en-IN')}</td>
       </tr>`;
@@ -821,8 +829,8 @@ export async function sendDailyPlanSubmittedEmail(data: {
       <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;color:#475569;">${t.projectName || '—'}</td>
       <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-weight:bold;color:${progressColor};text-align:center;">${progress}</td>
       <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;white-space:nowrap;font-size:12px;text-align:center;">
-        <div><span style="color:#94a3b8">Start:</span> ${t.start_date ? new Date(t.start_date).toLocaleDateString('en-IN') : '—'}</div>
-        <div><span style="color:#94a3b8">End:</span> ${t.end_date ? new Date(t.end_date).toLocaleDateString('en-IN') : '—'}</div>
+        <div><span style="color:#94a3b8">Start:</span> ${startTime}</div>
+        <div><span style="color:#94a3b8">End:</span> ${endTime}</div>
       </td>
     </tr>`;
   };
@@ -1392,6 +1400,8 @@ export async function sendDailyPlanConfirmationEmail(data: {
   const subject = `📋 Plan for the Day Submitted – ${date}`;
 
   const formatDate = (d?: string) => d ? new Date(d).toLocaleDateString('en-IN') : '—';
+  const formatTime = (d?: string) => d ? new Date(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : '—';
+  
   const progressBar = (pct: number = 0) => {
     const color = pct === 100 ? '#16a34a' : pct > 0 ? '#2563eb' : '#94a3b8';
     return `<div style="background:#e2e8f0;border-radius:20px;height:6px;width:80px;display:inline-block;vertical-align:middle;">
@@ -1407,8 +1417,8 @@ export async function sendDailyPlanConfirmationEmail(data: {
       </td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;color:#475569;font-size:13px;">${t.projectName || '—'}</td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;white-space:nowrap;font-size:12px;">
-        <div><span style="color:#94a3b8;">Start:</span> ${formatDate(t.start_date)}</div>
-        <div><span style="color:#94a3b8;">End:</span> ${formatDate(t.end_date)}</div>
+        <div><span style="color:#94a3b8;">Start:</span> ${formatTime(t.start_date)}</div>
+        <div><span style="color:#94a3b8;">End:</span> ${formatTime(t.end_date)}</div>
       </td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;text-align:center;">${progressBar(t.progress || 0)}</td>
     </tr>`).join('');
@@ -1421,8 +1431,8 @@ export async function sendDailyPlanConfirmationEmail(data: {
       </td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;font-style:italic;color:#64748b;font-size:13px;">${t.reason}</td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;white-space:nowrap;font-size:12px;">
-        <div><span style="color:#94a3b8;">Start:</span> ${formatDate(t.start_date)}</div>
-        <div><span style="color:#94a3b8;">End:</span> ${formatDate(t.end_date)}</div>
+        <div><span style="color:#94a3b8;">Start:</span> ${formatTime(t.start_date)}</div>
+        <div><span style="color:#94a3b8;">End:</span> ${formatTime(t.end_date)}</div>
       </td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;text-align:center;">${progressBar(t.progress || 0)}</td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;color:#d97706;font-weight:bold;font-size:12px;">${formatDate(t.newDueDate)}</td>

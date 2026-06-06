@@ -3,6 +3,7 @@ import { generateEmbedding } from "./ingest";
 
 export interface RetrievalFilter {
   source_db?: string;
+  data_type?: string;     // Added to filter by data type (e.g. company_policy)
   employee_id?: string;   // User's UUID in Timestrap
   employee_code?: string; // User's Employee Code (e.g. E0047)
   role?: string;          // User's role (employee, manager, hr, admin)
@@ -26,13 +27,21 @@ export async function retrieveContext(
       conditions.push(`metadata->>'source_db' = $${params.length}`);
     }
 
+    // Filter by data_type if provided
+    if (filter.data_type) {
+      params.push(filter.data_type);
+      conditions.push(`metadata->>'data_type' = $${params.length}`);
+    }
+
     // 2. Security Role Filter
     if (filter.role === "employee") {
-      if (filter.employee_id) {
+      if (filter.data_type === "company_policy") {
+        conditions.push(`metadata->'role_access' ? 'employee'`);
+      } else if (filter.employee_id) {
         params.push(filter.employee_id);
-        conditions.push(`metadata->>'employee_id' = $${params.length}`);
+        conditions.push(`(metadata->>'employee_id' = $${params.length} OR metadata->'role_access' ? 'employee')`);
       } else {
-        conditions.push(`1=0`);
+        conditions.push(`metadata->'role_access' ? 'employee'`);
       }
     } else if (filter.role === "manager" || filter.role === "hr" || filter.role === "admin") {
       // see everything — no filter
@@ -54,6 +63,9 @@ export async function retrieveContext(
     `;
 
     const res = await pool.query(sql, params);
+    console.log("[RAG] Query:", query);
+    console.log("[RAG] Results:", res.rows.length, "chunks");
+    console.log("[RAG] First result:", res.rows[0]?.content?.slice(0, 100));
     return res.rows.map((row) => row.content);
   } catch (error: any) {
     console.error("Error retrieving context:", error.message);

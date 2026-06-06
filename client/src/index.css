@@ -319,3 +319,5 @@
 .hover-glow {
   @apply transition-all duration-300 hover:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500/50;
 }
+
+

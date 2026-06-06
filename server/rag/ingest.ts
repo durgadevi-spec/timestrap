@@ -188,6 +188,16 @@ Status: ${entry.status || "pending"}.`;
 
       console.log(`Ingested timesheet: ${entry.id}`);
     });
+
+    // Auto-cleanup: delete timesheet embeddings older than 30 days (runs once after batch)
+    const cleaned = await pool.query(`
+      DELETE FROM document_embeddings
+      WHERE metadata->>'data_type' = 'timesheet'
+        AND created_at < NOW() - INTERVAL '30 days'
+    `);
+    if (cleaned.rowCount && cleaned.rowCount > 0) {
+      console.log(`Auto-cleaned ${cleaned.rowCount} old timesheet embeddings (>30 days)`);
+    }
   } catch (error: any) {
     console.error("Timesheets ingestion error:", error.message);
   }

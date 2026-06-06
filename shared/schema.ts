@@ -7,6 +7,7 @@ import {
   boolean,
   integer,
   jsonb,
+  unique,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -430,4 +431,34 @@ export const PROJECT_OPTIONS = [
   "HRMS Application",
   "PMS Application",
 ] as const;
+
+/* -------------------------------------------------------------------------- */
+/*                                 AI Memories                                */
+/* -------------------------------------------------------------------------- */
+export const aiMemories = pgTable("ai_memories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  employeeId: varchar("employee_id").notNull(),
+  memoryType: text("memory_type").notNull(),
+  memoryKey: text("memory_key").notNull(),
+  memoryValue: jsonb("memory_value").notNull(),
+  usageCount: integer("usage_count").default(1).notNull(),
+  lastUsedAt: timestamp("last_used_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique().on(t.employeeId, t.memoryType, t.memoryKey)
+]);
+
+/* -------------------------------------------------------------------------- */
+/*                                Chat Sessions                               */
+/* -------------------------------------------------------------------------- */
+export const chatSessions = pgTable("chat_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  employeeId: varchar("employee_id").notNull(),
+  title: text("title").notNull(),
+  messages: jsonb("messages").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 
