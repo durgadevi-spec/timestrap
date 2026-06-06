@@ -435,15 +435,15 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
     if (!formData.endTime) errs.push('End time is required');
     if (formData.toolsUsed.length === 0) errs.push('At least one tool must be selected');
     
-    // Validate task duration (max 120 minutes)
+    // Validate task duration (max 240 minutes)
     if (formData.startTime && formData.endTime) {
       try {
         const [startHour, startMin] = formData.startTime.split(':').map(Number);
         const [endHour, endMin] = formData.endTime.split(':').map(Number);
         const durationMinutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
         
-        if (durationMinutes > 120) {
-          errs.push('Task duration cannot exceed 2 hours (120 minutes)');
+        if (durationMinutes > 240) {
+          errs.push('Task duration cannot exceed 4 hours (240 minutes)');
         }
         if (durationMinutes <= 0) {
           errs.push('End time must be after start time');
@@ -862,8 +862,8 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                   onChange={(e) => {
                     setFormData({ ...formData, startTime: e.target.value });
                     const duration = checkTaskDuration(e.target.value, formData.endTime);
-                    if (duration && duration > 120) {
-                      toast({ title: 'Duration Warning', description: 'Task duration exceeds 2 hours (120 minutes) maximum', variant: 'destructive' });
+                    if (duration && duration > 240) {
+                      toast({ title: 'Duration Warning', description: 'Task duration exceeds 4 hours (240 minutes) maximum', variant: 'destructive' });
                     }
                   }}
                   className="pl-10 bg-slate-700/50 border-blue-500/20 text-white"
@@ -883,8 +883,8 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                   onChange={(e) => {
                     setFormData({ ...formData, endTime: e.target.value });
                     const duration = checkTaskDuration(formData.startTime, e.target.value);
-                    if (duration && duration > 120) {
-                      toast({ title: 'Duration Warning', description: 'Task duration exceeds 2 hours (120 minutes) maximum', variant: 'destructive' });
+                    if (duration && duration > 240) {
+                      toast({ title: 'Duration Warning', description: 'Task duration exceeds 4 hours (240 minutes) maximum', variant: 'destructive' });
                     }
                   }}
                   className="pl-10 bg-slate-700/50 border-blue-500/20 text-white"
@@ -892,7 +892,7 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                 />
               </div>
               {formData.startTime && formData.endTime && (
-                <p className={`text-xs ${checkTaskDuration(formData.startTime, formData.endTime) && checkTaskDuration(formData.startTime, formData.endTime)! > 120 ? 'text-rose-400 font-bold' : 'text-blue-400/60'}`}>
+                <p className={`text-xs ${checkTaskDuration(formData.startTime, formData.endTime) && checkTaskDuration(formData.startTime, formData.endTime)! > 240 ? 'text-rose-400 font-bold' : 'text-blue-400/60'}`}>
                   Duration: {checkTaskDuration(formData.startTime, formData.endTime)} minutes
                 </p>
               )}
