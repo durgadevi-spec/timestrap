@@ -264,6 +264,23 @@ export default function PlanForDayPage() {
     },
   });
 
+  // Fetch all projects user has access to (including created ones)
+  const { data: allAccessibleProjects = [] } = useQuery({
+    queryKey: ['/api/projects', user?.employeeCode, user?.role, user?.department],
+    enabled: !!user?.id,
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        userRole: user?.role || "",
+        userEmpCode: user?.employeeCode || "",
+        userDepartment: user?.department || "",
+      });
+      const res = await fetch(`/api/projects?${params.toString()}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    },
+  });
+
   const isWindowOpen = !!windowData?.planWindowOpen;
   const isPastCutoff = !!windowData?.isPastCutoff;
   const isOverrideToday = !!windowData?.isOverrideToday;
@@ -445,7 +462,10 @@ export default function PlanForDayPage() {
     return matchesSearch && matchesProject && matchesViewType && !task.isAutoSelected;
   });
 
-  const uniqueProjects = Array.from(new Set(availableTasks.map((t: any) => t.projectName))).filter(Boolean).sort();
+  const uniqueProjects = Array.from(new Set([
+    ...availableTasks.map((t: any) => t.projectName).filter(Boolean),
+    ...allAccessibleProjects.map((p: any) => p.project_name).filter(Boolean)
+  ])).sort();
 
   const filteredSelectedTasks = selectedTasks.filter((task: any) =>
     task.task_name.toLowerCase().includes(plannedTaskSearch.toLowerCase()) ||
