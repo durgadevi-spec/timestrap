@@ -54,7 +54,7 @@ export default function PlanForDayPage() {
   const getMaxDuration = (taskId: string): number => {
     if (taskId === 'break-morning' || taskId === 'break-evening') return 15; // 15 minutes max
     if (taskId === 'break-lunch') return 30; // 30 minutes max
-    return 90; // 90 minutes (1h 30m) max for regular tasks
+    return 240; // 240 minutes (4h) max for regular tasks
   };
 
   const durationForRange = (start: string, end: string, taskId?: string) => {
