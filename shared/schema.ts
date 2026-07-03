@@ -342,7 +342,9 @@ export const dailySubmissions = pgTable("daily_submissions", {
   date: text("date").notNull(), // yyyy-mm-dd
   totalHours: text("total_hours").notNull(),
   submittedAt: timestamp("submitted_at").defaultNow().notNull(),
-});
+}, (t) => [
+  unique("daily_submissions_employee_date_uniq").on(t.employeeId, t.date),
+]);
 
 export const planTasks = pgTable("plan_tasks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

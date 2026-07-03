@@ -1160,15 +1160,6 @@ export async function registerRoutes(
       const totalLMSMinutes = Math.round(lmsData.totalLMSHours * 60);
       const combinedMinutes = totalMinutes + totalLMSMinutes;
 
-      // 1. Check if already submitted
-      const existingSubmission = await storage.getDailySubmissionByDate(employeeId, date);
-      if (existingSubmission) {
-        return res.status(400).json({
-          error: "Already Submitted",
-          message: `You have already made a final submission for ${date}.`
-        });
-      }
-
       // 2. Working Hours Validation (Enforce 8 hours)
       const REQUIRED_MINUTES = 8 * 60; // 8 hours
       if (combinedMinutes < REQUIRED_MINUTES) {

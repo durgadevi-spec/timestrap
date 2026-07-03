@@ -819,7 +819,16 @@ export class DatabaseStorage implements IStorage {
 
   // Daily Submissions
   async createDailySubmission(data: InsertDailySubmission): Promise<DailySubmission> {
-    const [submission] = await db.insert(dailySubmissions).values(data).returning();
+    const [submission] = await db
+      .insert(dailySubmissions)
+      .values(data)
+      .onConflictDoUpdate({
+        target: [dailySubmissions.employeeId, dailySubmissions.date],
+        set: {
+          totalHours: data.totalHours,
+        },
+      })
+      .returning();
     return submission;
   }
 

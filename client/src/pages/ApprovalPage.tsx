@@ -18,7 +18,7 @@ import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import type { TimeEntry, SiteReport } from '@shared/schema';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { format, parseISO, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
+import { format, parseISO, startOfDay, endOfDay, isWithinInterval, startOfMonth, endOfMonth, addMonths, subMonths } from 'date-fns';
 
 interface ExtendedTimeEntry extends TimeEntry {
   lmsData?: {
@@ -105,9 +105,22 @@ export default function ApprovalPage({ user }: { user: User }) {
     return entry.status !== 'draft';
   };
 
-  const { data: rawTimeEntries = [], isLoading, refetch } = useQuery<ExtendedTimeEntry[]>({
-    queryKey: ['/api/time-entries'],
+  const [viewMonth, setViewMonth] = useState<Date>(() => startOfMonth(new Date()));
+  const [showAllTime, setShowAllTime] = useState(false);
+
+  const monthStart = useMemo(() => format(startOfMonth(viewMonth), 'yyyy-MM-dd'), [viewMonth]);
+  const monthEnd = useMemo(() => format(endOfMonth(viewMonth), 'yyyy-MM-dd'), [viewMonth]);
+
+  const { data: rawTimeEntriesData, isLoading, refetch } = useQuery<ExtendedTimeEntry[]>({
+    queryKey: ['/api/time-entries/approvals', showAllTime ? 'all' : monthStart, showAllTime ? 'all' : monthEnd],
+    queryFn: async () => {
+      const params = showAllTime ? '' : `?startDate=${monthStart}&endDate=${monthEnd}`;
+      const res = await apiRequest('GET', `/api/time-entries/approvals${params}`);
+      return res.json();
+    },
+    enabled: currentTab === 'timesheets',
   });
+  const rawTimeEntries = useMemo(() => rawTimeEntriesData || [], [rawTimeEntriesData]);
 
   const { data: rawSiteReports = [], isLoading: isSiteReportsLoading, refetch: refetchSiteReports } = useQuery<SiteReport[]>({
     queryKey: ['/api/site-reports'],
@@ -175,8 +188,8 @@ export default function ApprovalPage({ user }: { user: User }) {
   }, [rawSiteReports]);
 
   useWebSocket({
-    time_entry_created: () => queryClient.invalidateQueries({ queryKey: ['/api/time-entries'] }),
-    time_entry_updated: () => queryClient.invalidateQueries({ queryKey: ['/api/time-entries'] }),
+    time_entry_created: () => queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/api/time-entries') }),
+    time_entry_updated: () => queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/api/time-entries') }),
     site_report_created: () => queryClient.invalidateQueries({ queryKey: ['/api/site-reports'] }),
     site_report_updated: () => queryClient.invalidateQueries({ queryKey: ['/api/site-reports'] }),
   });
@@ -184,7 +197,7 @@ export default function ApprovalPage({ user }: { user: User }) {
   const approveMutation = useMutation({
     mutationFn: async (id: string) => apiRequest('PATCH', `/api/time-entries/${id}/approve`, { approvedBy: user.id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/time-entries'] });
+      queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/api/time-entries') });
       toast({ title: "Approved" });
     },
   });
@@ -192,7 +205,7 @@ export default function ApprovalPage({ user }: { user: User }) {
   const managerApproveMutation = useMutation({
     mutationFn: async (id: string) => apiRequest('PATCH', `/api/time-entries/${id}/manager-approve`, { approvedBy: user.id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/time-entries'] });
+      queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/api/time-entries') });
       toast({ title: "Manager Approved" });
     },
   });
@@ -201,7 +214,7 @@ export default function ApprovalPage({ user }: { user: User }) {
     mutationFn: async ({ id, reason }: { id: string; reason: string }) =>
       apiRequest('PATCH', `/api/time-entries/${id}/reject`, { approvedBy: user.id, reason }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/time-entries'] });
+      queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/api/time-entries') });
       toast({ title: "Rejected", variant: "destructive" });
     },
   });
@@ -210,7 +223,7 @@ export default function ApprovalPage({ user }: { user: User }) {
     mutationFn: async ({ id, reason }: { id: string; reason: string }) =>
       apiRequest('PATCH', `/api/time-entries/${id}/on-hold`, { managerId: user.id, reason }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/time-entries'] });
+      queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/api/time-entries') });
       toast({ title: "Put On Hold", variant: "default" });
     },
   });
@@ -233,7 +246,7 @@ export default function ApprovalPage({ user }: { user: User }) {
       ));
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/time-entries'] });
+      queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/api/time-entries') });
       toast({ title: `Approved ${selectedIds.size} entries` });
       setSelectedIds(new Set());
       setSelectAll(false);
@@ -247,7 +260,7 @@ export default function ApprovalPage({ user }: { user: User }) {
       ));
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/time-entries'] });
+      queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/api/time-entries') });
       toast({ title: `Rejected ${selectedIds.size} entries`, variant: "destructive" });
       setSelectedIds(new Set());
       setSelectAll(false);
@@ -397,6 +410,53 @@ export default function ApprovalPage({ user }: { user: User }) {
         </div>
       </div>
 
+      {/* Month Navigator */}
+      <Card className="bg-slate-800/60 border-blue-500/20 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setViewMonth(prev => subMonths(prev, 1))}
+            disabled={showAllTime}
+            className="bg-slate-900/50 border-blue-500/20 text-blue-300 hover:text-white"
+          >
+            ◀
+          </Button>
+          <span className="text-sm font-bold text-white min-w-[120px] text-center">
+            {showAllTime ? 'All Time' : format(viewMonth, 'MMMM yyyy')}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setViewMonth(next => addMonths(next, 1))}
+            disabled={showAllTime}
+            className="bg-slate-900/50 border-blue-500/20 text-blue-300 hover:text-white"
+          >
+            ▶
+          </Button>
+          {!showAllTime && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setViewMonth(startOfMonth(new Date()))}
+              className="text-xs text-blue-400 hover:text-white px-2"
+            >
+              This Month
+            </Button>
+          )}
+        </div>
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowAllTime(!showAllTime)}
+            className={`text-xs h-9 px-4 border-blue-500/25 ${showAllTime ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-900/50 text-blue-300 hover:text-white'}`}
+          >
+            {showAllTime ? 'Show Current Month' : 'Search All Time'}
+          </Button>
+        </div>
+      </Card>
+
       {/* Filter Section */}
       <Card className="bg-slate-800/60 border-blue-500/20 p-4">
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
@@ -440,7 +500,10 @@ export default function ApprovalPage({ user }: { user: User }) {
                 <Calendar
                   mode="single"
                   selected={selectedDate}
-                  onSelect={setSelectedDate}
+                  onSelect={(date) => {
+                    setSelectedDate(date);
+                    if (date && !showAllTime) setViewMonth(startOfMonth(date));
+                  }}
                   initialFocus
                 />
               </PopoverContent>

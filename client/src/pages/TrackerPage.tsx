@@ -617,13 +617,13 @@ export default function TrackerPage({ user }: TrackerPageProps) {
     return 0;
   };
 
-  const totalWorkedMinutes = useMemo(() => 
+  const totalWorkedMinutes = useMemo(() =>
     todaysTasksOnly.reduce((acc, task) => acc + calculateTaskMinutes(task), 0),
     [todaysTasksOnly]
   );
-  
+
   const totalCombinedMinutes = totalWorkedMinutes + lmsMinutes;
-  
+
   // Debug log for LMS
   console.log(`[LMS Debug] Code: ${user?.employeeCode}, Date: ${formattedDate}, Hours: ${lmsHours}, Minutes: ${lmsMinutes}, Total: ${totalCombinedMinutes}`);
 
@@ -639,7 +639,6 @@ export default function TrackerPage({ user }: TrackerPageProps) {
 
   const canSubmit =
     !isSubmitting &&
-    !alreadySubmittedToday &&
     !needsPlan &&
     todaysTasksOnly.length > 0 &&
     (hasEnoughHours || settings.forceAllowFinalSubmit);
@@ -828,7 +827,7 @@ export default function TrackerPage({ user }: TrackerPageProps) {
         }
 
         // Submit all pending tasks to database in parallel
-        await Promise.all(pendingTasks.map(task => 
+        await Promise.all(pendingTasks.map(task =>
           apiRequest('POST', '/api/time-entries', {
             employeeId: user.id,
             employeeCode: user.employeeCode,
@@ -1088,7 +1087,7 @@ export default function TrackerPage({ user }: TrackerPageProps) {
         <div className="tracker-top-row flex justify-between items-start relative z-10 md:w-[70%]">
           <div>
             <h1 className="text-xl md:text-2xl font-bold tracking-tight tracker-greeting-title animate-fade-in" style={{ fontFamily: 'Space Grotesk' }}>
-              Welcome back, {user.name} <span className="emoji-hand" style={{display:'inline-block'}}>👋</span>
+              Welcome back, {user.name} <span className="emoji-hand" style={{ display: 'inline-block' }}>👋</span>
             </h1>
             <p className="text-xs md:text-sm mt-0.5 tracker-greeting-subtitle animate-fade-in">
               Here's what's happening with your tasks today
@@ -1142,7 +1141,7 @@ export default function TrackerPage({ user }: TrackerPageProps) {
                     if (date) {
                       const today = startOfDay(new Date());
                       const maxDate = addDays(today, 4);
-                      
+
                       if (isAfter(startOfDay(date), maxDate)) {
                         toast({
                           title: "Action Restricted",
@@ -1151,7 +1150,7 @@ export default function TrackerPage({ user }: TrackerPageProps) {
                         });
                         return;
                       }
-                      
+
                       setSelectedDate(date);
                       loadTasksForDate(date);
                     }
@@ -1271,8 +1270,8 @@ export default function TrackerPage({ user }: TrackerPageProps) {
                   <Send className="w-5 h-5 text-yellow-400 tracker-pms-pending-icon" />
                   <div className="flex flex-col">
                     <span className="text-yellow-200 tracker-pms-pending-title">
-                      {alreadySubmittedToday 
-                        ? "You have already made a final submission for today." 
+                      {alreadySubmittedToday
+                        ? "You have already made a final submission for today."
                         : `${pendingTasks.length} task${pendingTasks.length > 1 ? 's' : ''} pending submission`}
                     </span>
                     {!hasEnoughHours && !alreadySubmittedToday && (
@@ -1652,8 +1651,8 @@ export default function TrackerPage({ user }: TrackerPageProps) {
                           pointerEvents: 'none',
                           opacity: 0.4
                         }} preserveAspectRatio="none">
-                          <path d="M20,65 Q35,30 65,40 Q85,15 115,30 Q145,20 160,65 Z" 
-                                fill="var(--card-accent-color)" opacity="0.5"/>
+                          <path d="M20,65 Q35,30 65,40 Q85,15 115,30 Q145,20 160,65 Z"
+                            fill="var(--card-accent-color)" opacity="0.5" />
                         </svg>
 
                         {/* Cloud Upload Icon */}
@@ -2028,7 +2027,7 @@ export default function TrackerPage({ user }: TrackerPageProps) {
                 </p>
               </div>
             </div>
-            <Button 
+            <Button
               onClick={() => setShowPlanAlert(false)}
               className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black py-6 rounded-2xl shadow-xl shadow-blue-900/40 transition-all hover:scale-[1.02] active:scale-95"
             >
