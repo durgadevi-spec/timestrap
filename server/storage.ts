@@ -1,5 +1,5 @@
 import { db, pool } from "./db";
-import { eq, desc, and, gte, lte, inArray } from "drizzle-orm";
+import { eq, desc, and, gte, lte, inArray, ne } from "drizzle-orm";
 import {
   organisations,
   employees,
@@ -108,6 +108,11 @@ export interface IStorage {
 
   // Time Entries
   getTimeEntries(): Promise<TimeEntry[]>;
+  // Added for the Approvals page — excludes un-submitted 'draft' entries (Plan-for-the-Day
+  // only creates drafts; they must not appear for approval until the timesheet is submitted)
+  // and can optionally be scoped to a date range so the page doesn't have to load the entire
+  // history (which was the cause of the Approvals page becoming unresponsive).
+  getApprovalTimeEntries(startDate?: string, endDate?: string): Promise<TimeEntry[]>;
   getTimeEntry(id: string): Promise<TimeEntry | undefined>;
   getTimeEntriesByEmployee(employeeId: string): Promise<TimeEntry[]>;
   // Added for grouped daily email summaries
@@ -426,6 +431,19 @@ export class DatabaseStorage implements IStorage {
   // Time Entries
   async getTimeEntries(): Promise<TimeEntry[]> {
     return await db.select().from(timeEntries).orderBy(desc(timeEntries.submittedAt));
+  }
+
+  async getApprovalTimeEntries(startDate?: string, endDate?: string): Promise<TimeEntry[]> {
+    // Always exclude 'draft' entries: those are created automatically when an employee
+    // submits their "Plan for the Day" and must not show up for approval until the
+    // employee actually submits the timesheet (submit-daily transitions draft -> pending).
+    const conditions = [ne(timeEntries.status, 'draft')];
+    if (startDate) conditions.push(gte(timeEntries.date, startDate));
+    if (endDate) conditions.push(lte(timeEntries.date, endDate));
+
+    return await db.select().from(timeEntries)
+      .where(and(...conditions))
+      .orderBy(desc(timeEntries.date), desc(timeEntries.submittedAt));
   }
 
   async getTimeEntry(id: string): Promise<TimeEntry | undefined> {
@@ -836,7 +854,7 @@ export class DatabaseStorage implements IStorage {
             lte(dailyPlans.date, endDate)
           )
         );
-      
+
       return q;
     } catch (error) {
       console.error("Error batch getting plan tasks:", error);

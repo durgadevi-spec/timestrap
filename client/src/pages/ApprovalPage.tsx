@@ -119,9 +119,9 @@ export default function ApprovalPage({ user }: { user: User }) {
     queryKey: ['/api/daily-plans/all'],
   });
 
-  const pendingPlansCount = useMemo(() => 
+  const pendingPlansCount = useMemo(() =>
     rawDailyPlans.filter(p => p.tasks.some((t: any) => t.isDeviation && t.status === 'pending')).length
-  , [rawDailyPlans]);
+    , [rawDailyPlans]);
 
   const approveSiteReportMutation = useMutation({
     mutationFn: async (id: string) => apiRequest('PATCH', `/api/site-reports/${id}/status`, { status: 'approved' }),
@@ -216,7 +216,7 @@ export default function ApprovalPage({ user }: { user: User }) {
   });
 
   const updatePlanTaskMutation = useMutation({
-    mutationFn: async ({ taskId, status }: { taskId: string; status: 'approved' | 'rejected' }) => 
+    mutationFn: async ({ taskId, status }: { taskId: string; status: 'approved' | 'rejected' }) =>
       apiRequest('PATCH', `/api/daily-plans/tasks/${taskId}/status`, { status }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/daily-plans/all'] });
@@ -337,13 +337,13 @@ export default function ApprovalPage({ user }: { user: User }) {
           <p className="text-blue-200/60 text-sm">Review and manage timesheet submissions</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
-            size="sm" 
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => {
               refetch();
               refetchSiteReports();
-            }} 
+            }}
             className="bg-slate-800 border-blue-500/20 text-blue-300"
           >
             <RefreshCw className={`w-4 h-4 mr-2 ${isLoading || isSiteReportsLoading ? 'animate-spin' : ''}`} />
@@ -569,26 +569,26 @@ export default function ApprovalPage({ user }: { user: User }) {
                           </div>
                         </div>
                       </div>
-                        <div className="flex flex-col gap-1 items-end">
-                          <Badge className={`uppercase text-[10px] px-2 py-0.5 ${entry.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
-                            entry.status === 'resubmitted' ? 'bg-orange-500/20 text-orange-400 border-orange-500/50 shadow-[0_0_10px_rgba(249,115,22,0.4)] animate-pulse' :
-                              entry.status === 'approved' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
-                                entry.status === 'manager_approved' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
-                                  entry.status === 'on_hold' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
-                                    'bg-red-500/20 text-red-400 border-red-500/30'
-                            } border`}>
-                            {entry.status ? entry.status.replace('_', ' ') : 'pending'}
+                      <div className="flex flex-col gap-1 items-end">
+                        <Badge className={`uppercase text-[10px] px-2 py-0.5 ${entry.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+                          entry.status === 'resubmitted' ? 'bg-orange-500/20 text-orange-400 border-orange-500/50 shadow-[0_0_10px_rgba(249,115,22,0.4)] animate-pulse' :
+                            entry.status === 'approved' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                              entry.status === 'manager_approved' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                                entry.status === 'on_hold' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
+                                  'bg-red-500/20 text-red-400 border-red-500/30'
+                          } border`}>
+                          {entry.status ? entry.status.replace('_', ' ') : 'pending'}
+                        </Badge>
+                        {entry.pmsId ? (
+                          <Badge variant="outline" className="text-[9px] bg-indigo-500/10 text-indigo-400 border-indigo-500/20">
+                            <Target className="w-2.5 h-2.5 mr-1" /> PLANNED
                           </Badge>
-                          {entry.pmsId ? (
-                            <Badge variant="outline" className="text-[9px] bg-indigo-500/10 text-indigo-400 border-indigo-500/20">
-                              <Target className="w-2.5 h-2.5 mr-1" /> PLANNED
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-[9px] bg-amber-500/10 text-amber-400 border-amber-500/20">
-                              <Zap className="w-2.5 h-2.5 mr-1" /> MANUAL
-                            </Badge>
-                          )}
-                        </div>
+                        ) : (
+                          <Badge variant="outline" className="text-[9px] bg-amber-500/10 text-amber-400 border-amber-500/20">
+                            <Zap className="w-2.5 h-2.5 mr-1" /> MANUAL
+                          </Badge>
+                        )}
+                      </div>
                     </div>
 
                     {/* LMS Hours Summary (if any) */}
@@ -736,7 +736,7 @@ export default function ApprovalPage({ user }: { user: User }) {
               rawSiteReports.map((report) => (
                 <Card key={report.id} className="bg-slate-900/60 border-cyan-500/10 p-5 overflow-hidden relative group">
                   <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-500/5 blur-3xl rounded-full -mr-12 -mt-12 group-hover:bg-cyan-500/10 transition-colors" />
-                  
+
                   <div className="flex flex-col md:flex-row justify-between gap-4 relative z-10">
                     <div className="flex gap-4">
                       <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 flex flex-col items-center justify-center border border-cyan-500/30">
@@ -755,13 +755,12 @@ export default function ApprovalPage({ user }: { user: User }) {
                         </div>
                       </div>
                     </div>
-                    
+
                     <div className="flex flex-col items-end gap-2">
-                      <Badge className={`uppercase text-[9px] px-2 py-0.5 tracking-wider font-bold ${
-                        report.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
-                        report.status === 'approved' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
-                        'bg-red-500/20 text-red-400 border-red-500/30'
-                      } border`}>
+                      <Badge className={`uppercase text-[9px] px-2 py-0.5 tracking-wider font-bold ${report.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+                          report.status === 'approved' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                            'bg-red-500/20 text-red-400 border-red-500/30'
+                        } border`}>
                         {report.status}
                       </Badge>
                       <p className="text-[10px] text-slate-500">Submitted by: <span className="text-slate-300 font-medium">{report.employeeName}</span></p>
@@ -780,11 +779,11 @@ export default function ApprovalPage({ user }: { user: User }) {
                         <span className="text-emerald-400 text-[9px] uppercase font-bold block mb-1.5 flex items-center gap-1">
                           <MapPin className="w-3 h-3" /> Location
                         </span>
-                        <p className="text-white text-xs font-semibold truncate">{report.locationLat.substring(0,8)}, {report.locationLng?.substring(0,8)}</p>
+                        <p className="text-white text-xs font-semibold truncate">{report.locationLat.substring(0, 8)}, {report.locationLng?.substring(0, 8)}</p>
                       </div>
                     )}
                     <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-700/50 lg:col-span-2">
-                       <span className="text-blue-400 text-[9px] uppercase font-bold block mb-1.5 flex items-center gap-1">
+                      <span className="text-blue-400 text-[9px] uppercase font-bold block mb-1.5 flex items-center gap-1">
                         <FileText className="w-3 h-3" /> Description
                       </span>
                       <p className="text-slate-300 text-xs line-clamp-2">{report.workDone}</p>
@@ -793,9 +792,9 @@ export default function ApprovalPage({ user }: { user: User }) {
 
                   <div className="mt-4 pt-4 border-t border-white/5 flex flex-col md:flex-row justify-between gap-4">
                     <div className="flex gap-2">
-                       <Button 
-                        size="sm" 
-                        variant="ghost" 
+                      <Button
+                        size="sm"
+                        variant="ghost"
                         className="h-8 text-[10px] text-slate-400 hover:text-white"
                         onClick={async () => {
                           setLoadingDetail(true);
@@ -815,12 +814,12 @@ export default function ApprovalPage({ user }: { user: User }) {
                         View Full Report
                       </Button>
                     </div>
-                    
+
                     {report.status === 'pending' && (
                       <div className="flex gap-2">
-                        <Button 
-                          size="sm" 
-                          variant="destructive" 
+                        <Button
+                          size="sm"
+                          variant="destructive"
                           className="h-8 text-xs font-bold"
                           onClick={() => rejectSiteReportMutation.mutate(report.id)}
                           disabled={rejectSiteReportMutation.isPending}
@@ -828,8 +827,8 @@ export default function ApprovalPage({ user }: { user: User }) {
                           {rejectSiteReportMutation.isPending && <Loader2 className="w-3 h-3 mr-2 animate-spin" />}
                           Reject
                         </Button>
-                        <Button 
-                          size="sm" 
+                        <Button
+                          size="sm"
                           className="h-8 text-xs bg-cyan-600 hover:bg-cyan-500 text-white font-bold"
                           onClick={() => approveSiteReportMutation.mutate(report.id)}
                           disabled={approveSiteReportMutation.isPending}
@@ -1170,7 +1169,7 @@ export default function ApprovalPage({ user }: { user: User }) {
                       height="100%"
                       frameBorder="0"
                       scrolling="no"
-                      src={`https://www.openstreetmap.org/export/embed.html?bbox=${parseFloat(siteReportDetail.locationLng)-0.005}%2C${parseFloat(siteReportDetail.locationLat)-0.005}%2C${parseFloat(siteReportDetail.locationLng)+0.005}%2C${parseFloat(siteReportDetail.locationLat)+0.005}&layer=mapnik&marker=${siteReportDetail.locationLat}%2C${siteReportDetail.locationLng}`}
+                      src={`https://www.openstreetmap.org/export/embed.html?bbox=${parseFloat(siteReportDetail.locationLng) - 0.005}%2C${parseFloat(siteReportDetail.locationLat) - 0.005}%2C${parseFloat(siteReportDetail.locationLng) + 0.005}%2C${parseFloat(siteReportDetail.locationLat) + 0.005}&layer=mapnik&marker=${siteReportDetail.locationLat}%2C${siteReportDetail.locationLng}`}
                       style={{ filter: 'invert(90%) hue-rotate(180deg) brightness(95%) contrast(90%)' }}
                     />
                   </div>
@@ -1209,11 +1208,10 @@ export default function ApprovalPage({ user }: { user: User }) {
               {/* Status */}
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-white/5">
                 <span className="text-xs text-slate-400">Report Status</span>
-                <Badge className={`uppercase text-[10px] px-3 py-1 font-bold ${
-                  siteReportDetail.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
-                  siteReportDetail.status === 'approved' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
-                  'bg-red-500/20 text-red-400 border-red-500/30'
-                } border`}>
+                <Badge className={`uppercase text-[10px] px-3 py-1 font-bold ${siteReportDetail.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+                    siteReportDetail.status === 'approved' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+                      'bg-red-500/20 text-red-400 border-red-500/30'
+                  } border`}>
                   {siteReportDetail.status}
                 </Badge>
               </div>
@@ -1246,21 +1244,21 @@ function LMSHoursDisplay({ employeeCode, date }: { employeeCode: string; date: s
         <Clock className="w-3.5 h-3.5 text-blue-400" />
         <span className="text-[9px] font-extrabold uppercase tracking-widest text-blue-300/60">LMS Data</span>
       </div>
-      
+
       {lmsHours.leaveHours > 0 && (
         <Badge className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-none shadow-md shadow-blue-900/40 text-[10px] py-1 px-3 font-bold">
           <CalendarIcon className="w-3 h-3 mr-1.5" />
           Leave: {lmsHours.leaveHours}h
         </Badge>
       )}
-      
+
       {lmsHours.permissionHours > 0 && (
         <Badge className="bg-gradient-to-r from-purple-600 to-pink-600 text-white border-none shadow-md shadow-purple-900/40 text-[10px] py-1 px-3 font-bold">
           <Zap className="w-3 h-3 mr-1.5" />
           Permission: {lmsHours.permissionHours}h
         </Badge>
       )}
-      
+
       <div className="ml-auto flex items-center gap-2 px-3 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/20">
         <span className="text-[10px] font-bold uppercase tracking-widest text-cyan-400">Total</span>
         <span className="text-sm font-black text-white">{lmsHours.totalLMSHours}h</span>

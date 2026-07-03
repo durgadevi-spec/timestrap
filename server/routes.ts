@@ -67,11 +67,11 @@ function isAfterPlanCutoff(): boolean {
   // Normalize to UTC first, then add IST offset (5.5h)
   const utcNow = now.getTime() + (now.getTimezoneOffset() * 60000);
   const istNow = new Date(utcNow + (5.5 * 60 * 60 * 1000));
-  
+
   // Use UTC methods to get the "local" components of the shifted date
   const hours = istNow.getUTCHours();
   const minutes = istNow.getUTCMinutes();
-  
+
   // Return true if current time in IST is past 12:30 PM
   return (hours > 12) || (hours === 12 && minutes >= 30);
 }
@@ -573,9 +573,9 @@ export async function registerRoutes(
     try {
       const { projectId, userDepartment, userEmpCode, userRole } = req.query;
       const tasks = await storage.getTasks(
-        projectId as string, 
-        userDepartment as string, 
-        userEmpCode as string, 
+        projectId as string,
+        userDepartment as string,
+        userEmpCode as string,
         userRole as string
       );
       res.json(tasks);
@@ -662,6 +662,26 @@ export async function registerRoutes(
   });
 
   // ============ TIME ENTRY ROUTES ============
+
+  // Approvals page feed: excludes 'draft' entries (created only when an employee submits
+  // their Plan for the Day, before the timesheet itself is submitted) and, by default, is
+  // scoped to a date range (the page defaults to the current month) so we don't ship the
+  // entire time_entries table to the browser on every load.
+  app.get("/api/time-entries/approvals", async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      const entries = await storage.getApprovalTimeEntries(
+        startDate as string | undefined,
+        endDate as string | undefined
+      );
+      const enriched = await batchEnrichEntries(entries);
+      res.json(enriched);
+    } catch (error) {
+      console.error("Get approval time entries error:", error);
+      res.status(500).json({ error: "Failed to fetch approval time entries" });
+    }
+  });
+
   app.get("/api/time-entries", async (req, res) => {
     try {
       const entries = await storage.getTimeEntries();
@@ -752,38 +772,38 @@ export async function registerRoutes(
       if (!isPastDay) {
         const plan = await storage.getDailyPlanByDate(entryData.employeeId, entryData.date);
         if (!plan) {
-           return res.status(403).json({ error: "You must submit your 'Plan for the Day' before filling timesheets." });
+          return res.status(403).json({ error: "You must submit your 'Plan for the Day' before filling timesheets." });
         }
 
         // Check if task exists in the plan
         const planTasks = await storage.getPlanTasks(plan.id);
         let isPlanned = planTasks.some(pt => pt.taskId === entryData.pmsId || pt.taskId === entryData.pmsSubtaskId);
-        
+
         // If not directly planned, check if it's a subtask of a planned task
         if (!isPlanned && entryData.pmsSubtaskId) {
-           const { getSubtaskById } = await import('./pmsSupabase');
-           const subtask = await getSubtaskById(entryData.pmsSubtaskId);
-           if (subtask && subtask.task_id) {
-             isPlanned = planTasks.some(pt => pt.taskId === subtask.task_id);
-           }
+          const { getSubtaskById } = await import('./pmsSupabase');
+          const subtask = await getSubtaskById(entryData.pmsSubtaskId);
+          if (subtask && subtask.task_id) {
+            isPlanned = planTasks.some(pt => pt.taskId === subtask.task_id);
+          }
         }
 
         if (!isPlanned && (entryData.pmsId || entryData.pmsSubtaskId)) {
-           // Instead of blocking, we automatically add it as a deviation
-           console.log(`[TIME-ENTRY] Task ${entryData.pmsId || entryData.pmsSubtaskId} not in plan. Adding as auto-deviation.`);
-           try {
-             await storage.createPlanTask({
-               planId: plan.id,
-               taskId: entryData.pmsId || entryData.pmsSubtaskId || 'unplanned',
-               projectName: entryData.projectName,
-               taskName: entryData.taskDescription,
-               isDeviation: true,
-               deviationReason: "Automatically added via timesheet submission",
-               status: 'approved'
-             });
-           } catch (devErr) {
-             console.error("[TIME-ENTRY] Failed to auto-create deviation:", devErr);
-           }
+          // Instead of blocking, we automatically add it as a deviation
+          console.log(`[TIME-ENTRY] Task ${entryData.pmsId || entryData.pmsSubtaskId} not in plan. Adding as auto-deviation.`);
+          try {
+            await storage.createPlanTask({
+              planId: plan.id,
+              taskId: entryData.pmsId || entryData.pmsSubtaskId || 'unplanned',
+              projectName: entryData.projectName,
+              taskName: entryData.taskDescription,
+              isDeviation: true,
+              deviationReason: "Automatically added via timesheet submission",
+              status: 'approved'
+            });
+          } catch (devErr) {
+            console.error("[TIME-ENTRY] Failed to auto-create deviation:", devErr);
+          }
         }
       }
 
@@ -800,7 +820,7 @@ export async function registerRoutes(
         if (req.body.pmsSubtaskId) {
           console.log(`[PMS-SYNC] Updating subtask ${req.body.pmsSubtaskId} progress`);
           await updateSubtaskProgress(req.body.pmsSubtaskId, entryData.percentageComplete);
-          
+
           // Resolve project ID for broadcast
           const res = await pmsPool.query('SELECT project_id FROM project_tasks pt JOIN subtasks s ON pt.id = s.task_id WHERE s.id = $1::uuid', [req.body.pmsSubtaskId]);
           if (res.rows && res.rows.length > 0) targetProjectId = res.rows[0].project_id;
@@ -809,7 +829,7 @@ export async function registerRoutes(
         else if (req.body.pmsId) {
           console.log(`[PMS-SYNC] Updating task ${req.body.pmsId} progress (no subtask) using date ${entry.date}`);
           await updateTaskProgress(req.body.pmsId, entryData.percentageComplete, entry.date);
-          
+
           // Resolve project ID for broadcast
           const res = await pmsPool.query('SELECT project_id FROM project_tasks WHERE id = $1::uuid', [req.body.pmsId]);
           if (res.rows && res.rows.length > 0) targetProjectId = res.rows[0].project_id;
@@ -819,7 +839,7 @@ export async function registerRoutes(
         if (targetProjectId) {
           const finalProgress = await getProjectProgress(targetProjectId);
           console.log(`[PMS-SYNC] Final Project ${targetProjectId} progress: ${finalProgress}%`);
-          
+
           // Sync with gamification points (Max 600 points = 100%)
           // This ensures the AchievementTree grows based on project completion %
           const targetPoints = Math.round(finalProgress * 6);
@@ -832,8 +852,8 @@ export async function registerRoutes(
             );
           } catch (pErr) { console.error('Failed to sync project points:', pErr); }
 
-          broadcast("project_progress_updated", { 
-            projectId: entry.projectName, 
+          broadcast("project_progress_updated", {
+            projectId: entry.projectName,
             progress: finalProgress,
             points: targetPoints
           });
@@ -910,7 +930,7 @@ export async function registerRoutes(
           if (req.body.pmsSubtaskId) {
             console.log(`[PMS-SYNC] Updating subtask ${req.body.pmsSubtaskId} progress during edit`);
             await updateSubtaskProgress(req.body.pmsSubtaskId, entryData.percentageComplete);
-            
+
             // Resolve project ID for broadcast
             const res = await pmsPool.query('SELECT project_id FROM project_tasks pt JOIN subtasks s ON pt.id = s.task_id WHERE s.id = $1::uuid', [req.body.pmsSubtaskId]);
             if (res.rows && res.rows.length > 0) targetProjectId = res.rows[0].project_id;
@@ -919,7 +939,7 @@ export async function registerRoutes(
           else if (req.body.pmsId) {
             console.log(`[PMS-SYNC] Updating task ${req.body.pmsId} progress during edit`);
             await updateTaskProgress(req.body.pmsId, entryData.percentageComplete, entry.date);
-            
+
             // Resolve project ID for broadcast
             const res = await pmsPool.query('SELECT project_id FROM project_tasks WHERE id = $1::uuid', [req.body.pmsId]);
             if (res.rows && res.rows.length > 0) targetProjectId = res.rows[0].project_id;
@@ -930,7 +950,7 @@ export async function registerRoutes(
             const { getProjectProgress } = await import('./pmsSupabase');
             const finalProgress = await getProjectProgress(targetProjectId);
             console.log(`[PMS-SYNC] Final Project ${targetProjectId} progress after edit: ${finalProgress}%`);
-            
+
             // Sync with gamification points (Max 600 points = 100%)
             const targetPoints = Math.round(finalProgress * 6);
             try {
@@ -942,8 +962,8 @@ export async function registerRoutes(
               );
             } catch (pErr) { console.error('Failed to sync project points:', pErr); }
 
-            broadcast("project_progress_updated", { 
-              projectId: entry.projectName, 
+            broadcast("project_progress_updated", {
+              projectId: entry.projectName,
               progress: finalProgress,
               points: targetPoints
             });
@@ -1031,38 +1051,38 @@ export async function registerRoutes(
       // Check for existing entry
       const existingEntries = await storage.getTimeEntriesByEmployee(employeeId);
       const match = existingEntries.find((e: any) => {
-         if (e.date !== date) return false;
-         if (event.pmsId) return e.pmsId === event.pmsId || e.pmsSubtaskId === event.pmsId;
-         return e.taskDescription === event.title;
+        if (e.date !== date) return false;
+        if (event.pmsId) return e.pmsId === event.pmsId || e.pmsSubtaskId === event.pmsId;
+        return e.taskDescription === event.title;
       });
 
       if (match) {
         // Update if pending, draft, or rejected. If approved/submitted, skip modifying it to prevent data corruption.
         if (match.status === 'pending' || match.status === 'rejected' || match.status === 'draft') {
-           const updated = await pool.query(
-             `UPDATE time_entries SET start_time = $1, end_time = $2, total_hours = $3 WHERE id = $4 RETURNING *`,
-             [tStart, tEnd, totalHours, match.id]
-           );
-           broadcast("time_entry_updated", await enrichEntry(updated.rows[0]));
-           return res.json({ success: true, action: "updated", entry: await enrichEntry(updated.rows[0]) });
+          const updated = await pool.query(
+            `UPDATE time_entries SET start_time = $1, end_time = $2, total_hours = $3 WHERE id = $4 RETURNING *`,
+            [tStart, tEnd, totalHours, match.id]
+          );
+          broadcast("time_entry_updated", await enrichEntry(updated.rows[0]));
+          return res.json({ success: true, action: "updated", entry: await enrichEntry(updated.rows[0]) });
         } else {
-           return res.json({ success: true, action: "skipped_locked" });
+          return res.json({ success: true, action: "skipped_locked" });
         }
       } else {
         // Create new
         const entry = await storage.createTimeEntry({
-           employeeId,
-           employeeCode: employee.employeeCode,
-           employeeName: employee.name,
-           date: date,
-           projectName: event.project || "General",
-           taskDescription: event.title,
-           quantify: "",
-           startTime: tStart,
-           endTime: tEnd,
-           totalHours,
-           pmsId: event.pmsId || null,
-           status: 'draft'
+          employeeId,
+          employeeCode: employee.employeeCode,
+          employeeName: employee.name,
+          date: date,
+          projectName: event.project || "General",
+          taskDescription: event.title,
+          quantify: "",
+          startTime: tStart,
+          endTime: tEnd,
+          totalHours,
+          pmsId: event.pmsId || null,
+          status: 'draft'
         });
         broadcast("time_entry_created", entry);
         return res.json({ success: true, action: "created", entry });
@@ -1143,17 +1163,17 @@ export async function registerRoutes(
       // 1. Check if already submitted
       const existingSubmission = await storage.getDailySubmissionByDate(employeeId, date);
       if (existingSubmission) {
-        return res.status(400).json({ 
-          error: "Already Submitted", 
-          message: `You have already made a final submission for ${date}.` 
+        return res.status(400).json({
+          error: "Already Submitted",
+          message: `You have already made a final submission for ${date}.`
         });
       }
 
       // 2. Working Hours Validation (Enforce 8 hours)
       const REQUIRED_MINUTES = 8 * 60; // 8 hours
       if (combinedMinutes < REQUIRED_MINUTES) {
-        return res.status(400).json({ 
-          error: "Insufficient hours", 
+        return res.status(400).json({
+          error: "Insufficient hours",
           message: `Total working hours (Timesheet + Leave/Permission) must be at least 8 hours. Current total: ${formatDuration(combinedMinutes)}`,
           workMinutes: totalMinutes,
           lmsMinutes: totalLMSMinutes,
@@ -1179,7 +1199,7 @@ export async function registerRoutes(
       // use the raw entries as tasks so the email helper has full data
       const tasks = dailyEntries;
       const { sendTimesheetSummaryEmail, sendTimesheetConfirmationEmail } = await import('./email');
-      
+
       // 1. Send summary to Admin/HR (Existing)
       const emailResult = await sendTimesheetSummaryEmail({
         employeeId: employee.id,
@@ -1773,34 +1793,34 @@ export async function registerRoutes(
     }
   });
 
-// Helper to determine if a PMS task should be auto-synced based on its schedule
-function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
-  if (!task.schedule_type || task.schedule_type === 'None') return false;
+  // Helper to determine if a PMS task should be auto-synced based on its schedule
+  function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
+    if (!task.schedule_type || task.schedule_type === 'None') return false;
 
-  const targetDate = new Date(targetDateStr);
-  const dayName = format(targetDate, 'EEEE'); // e.g. "Monday"
-  const dayOfMonth = targetDate.getDate();
+    const targetDate = new Date(targetDateStr);
+    const dayName = format(targetDate, 'EEEE'); // e.g. "Monday"
+    const dayOfMonth = targetDate.getDate();
 
-  switch (task.schedule_type) {
-    case 'Daily':
-      return true;
-    case 'Weekly':
-      const weeklyDays = Array.isArray(task.schedule_data?.weekdays) ? task.schedule_data.weekdays : [];
-      return weeklyDays.includes(dayName);
-    case 'Monthly':
-      const monthlyDates = Array.isArray(task.schedule_data?.dates) ? task.schedule_data.dates : [];
-      return monthlyDates.includes(dayOfMonth);
-    case 'Custom':
-      if (!task.start_date || !task.end_date) return false;
-      const start = new Date(task.start_date);
-      const end = new Date(task.end_date);
-      // Normalize to compare just dates
-      const t = new Date(targetDateStr).getTime();
-      return t >= start.getTime() && t <= end.getTime();
-    default:
-      return false;
+    switch (task.schedule_type) {
+      case 'Daily':
+        return true;
+      case 'Weekly':
+        const weeklyDays = Array.isArray(task.schedule_data?.weekdays) ? task.schedule_data.weekdays : [];
+        return weeklyDays.includes(dayName);
+      case 'Monthly':
+        const monthlyDates = Array.isArray(task.schedule_data?.dates) ? task.schedule_data.dates : [];
+        return monthlyDates.includes(dayOfMonth);
+      case 'Custom':
+        if (!task.start_date || !task.end_date) return false;
+        const start = new Date(task.start_date);
+        const end = new Date(task.end_date);
+        // Normalize to compare just dates
+        const t = new Date(targetDateStr).getTime();
+        return t >= start.getTime() && t <= end.getTime();
+      default:
+        return false;
+    }
   }
-}
 
   // Return pending tasks assigned to employee that are due on given date and not completed
   app.get('/api/pending-deadline-tasks', async (req, res) => {
@@ -2097,7 +2117,7 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
       const { employeeId } = req.params;
       const date = new Date().toISOString().split('T')[0];
       const plan = await storage.getDailyPlanByDate(employeeId, date);
-      
+
       if (!plan) {
         return res.json({ submitted: false });
       }
@@ -2114,7 +2134,7 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
     try {
       const { date, employeeId } = req.params;
       const plan = await storage.getDailyPlanByDate(employeeId, date);
-      
+
       if (!plan) {
         return res.json({ submitted: false });
       }
@@ -2125,12 +2145,12 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
         `SELECT task_name, reason, new_due_date FROM task_postponements WHERE postponed_by = $1 AND DATE(postponed_at) = $2::date`,
         [employeeId, date]
       );
-      
-      res.json({ 
-        submitted: true, 
-        plan, 
-        tasks, 
-        postponedTasks: postponements.rows || [] 
+
+      res.json({
+        submitted: true,
+        plan,
+        tasks,
+        postponedTasks: postponements.rows || []
       });
     } catch (error) {
       console.error("Get plan by date error:", error);
@@ -2185,16 +2205,16 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
     const utcNow = now.getTime() + (now.getTimezoneOffset() * 60000);
     const istNow = new Date(utcNow + (5.5 * 60 * 60 * 1000));
     const today = format(istNow, "yyyy-MM-dd");
-    
+
     const isAutomatedClosed = await storage.isDailyPlanClosed(today);
     const isPastCutoff = isAfterPlanCutoff();
-    
+
     // Manual override logic: If admin explicitly toggled today, use that state.
     // Otherwise, use the default automated logic (open until cutoff).
     const isOverrideToday = settings.planWindowLastModifiedDate === today;
     const planWindowOpen = isOverrideToday ? !!settings.planWindowOpen : (!isAutomatedClosed && !isPastCutoff);
 
-    res.json({ 
+    res.json({
       planWindowOpen,
       isAutomatedClosed,
       isPastCutoff,
@@ -2213,7 +2233,7 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
       }
       const settings = await readSettings();
       const wasOpen = !!settings.planWindowOpen;
-      
+
       const now = new Date();
       const utcNow = now.getTime() + (now.getTimezoneOffset() * 60000);
       const istNow = new Date(utcNow + (5.5 * 60 * 60 * 1000));
@@ -2230,7 +2250,7 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
           const allEmployees = await storage.getEmployees();
           const recipients = allEmployees.filter(e => e.isActive && e.email).map(e => e.email) as string[];
           const today = new Date().toLocaleDateString('en-IN');
-          
+
           if (recipients.length > 0) {
             await sendPlanWindowClosedEmail({
               recipients,
@@ -2261,17 +2281,17 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
       // Check if plan window is open (manual override has priority)
       const settings = await readSettings();
       const isPastCutoff = isAfterPlanCutoff();
-      
+
       const istNow = new Date(new Date().getTime() + (new Date().getTimezoneOffset() * 60000) + (5.5 * 60 * 60 * 1000));
       const today = format(istNow, "yyyy-MM-dd");
       const isAutomatedClosed = await storage.isDailyPlanClosed(today);
-      
+
       const isOverrideToday = settings.planWindowLastModifiedDate === today;
       const planWindowOpen = isOverrideToday ? !!settings.planWindowOpen : (!isAutomatedClosed && !isPastCutoff);
 
       if (!planWindowOpen) {
         const reason = isPastCutoff ? "12:30 PM cutoff" : "administrative closure";
-        return res.status(403).json({ 
+        return res.status(403).json({
           error: `Plan window is closed (${reason}). Contact your administrator to reopen.`,
           message: `Plan window is closed (${reason})`
         });
@@ -2301,7 +2321,7 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
           for (const mt of mandatoryTasks) {
             const isIncluded = selectedTasks.some((st: any) => st.id === mt.id);
             if (!isIncluded) {
-              return res.status(400).json({ 
+              return res.status(400).json({
                 error: `Mandatory PMS task '${mt.task_name}' is missing from your plan.`,
                 taskId: mt.id
               });
@@ -2311,10 +2331,10 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
       }
 
       // Plan window is always open unless explicitly restricted by other future logic
-      const isInTimeWindow = true; 
+      const isInTimeWindow = true;
       let plan;
       const existingPlan = await storage.getDailyPlanByDate(employeeId, planDate);
-      
+
       if (existingPlan) {
         // If plan exists, we'll "re-submit" it by clearing tasks and starting over
         // This is only allowed if the window is forced open or during the 9-12 AM window
@@ -2361,14 +2381,14 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
           }
 
           const isBreak = t.isBreak || t.task_name?.toLowerCase().includes("break") || t.task_name?.toLowerCase().includes("lunch");
-          
+
           if (!isBreak) {
             // Check if we already created a time entry for this task on this date
             const alreadyExists = todayEntries.some((e: any) => {
-               if (t.id && !t.id.startsWith('planned-') && !t.id.startsWith('break-')) {
-                  return e.pmsId === t.id || e.pmsSubtaskId === t.id;
-               }
-               return e.taskDescription === t.task_name;
+              if (t.id && !t.id.startsWith('planned-') && !t.id.startsWith('break-')) {
+                return e.pmsId === t.id || e.pmsSubtaskId === t.id;
+              }
+              return e.taskDescription === t.task_name;
             });
 
             if (!alreadyExists) {
@@ -2398,11 +2418,11 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
 
       // Save unselected tasks as postponements
       for (const t of unselectedTasks) {
-         await pool.query(
-            `INSERT INTO task_postponements (task_id, task_name, reason, previous_due_date, new_due_date, postponed_by, postponed_at) 
+        await pool.query(
+          `INSERT INTO task_postponements (task_id, task_name, reason, previous_due_date, new_due_date, postponed_by, postponed_at) 
              VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-            [t.taskId, t.taskName, t.reason, null, t.newDueDate, employeeId]
-         );
+          [t.taskId, t.taskName, t.reason, null, t.newDueDate, employeeId]
+        );
       }
 
       broadcast("daily_plan_submitted", { plan, employeeId });
@@ -2411,7 +2431,7 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
       try {
         const { sendDailyPlanSubmittedEmail, sendDailyPlanConfirmationEmail } = await import('./email');
         const emp = await storage.getEmployee(employeeId);
-        
+
         if (emp) {
           // 1. Send to Admin/HR (Existing)
           await sendDailyPlanSubmittedEmail({
@@ -2447,14 +2467,14 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
   app.post("/api/daily-plans/reminder", async (req, res) => {
     try {
       const { employeeId } = req.body;
-      
+
       // Validate request
       if (!employeeId) {
         return res.status(400).json({ error: "Missing employeeId in request body" });
       }
 
       const actor = await storage.getEmployee(employeeId);
-      
+
       // Access Restricted: Only E0046 and E0048 can send reminders
       if (!actor || (actor.employeeCode !== 'E0046' && actor.employeeCode !== 'E0048')) {
         console.warn(`[REMINDER API] Unauthorized access attempt by: ${employeeId}`);
@@ -2473,7 +2493,7 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
       console.log(`[REMINDER API] Found ${activeEmployees.length} active employees with email`);
 
       const today = format(new Date(), 'yyyy-MM-dd');
-      
+
       let { sendDailyPlanReminderEmail } = await import('./email');
       if (!sendDailyPlanReminderEmail) {
         throw new Error("sendDailyPlanReminderEmail function not found");
@@ -2487,10 +2507,10 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
           // Verify email is valid string (should already be verified by filter, but double-check)
           if (!emp.email || typeof emp.email !== 'string') {
             console.warn(`[REMINDER API] Employee ${emp.employeeCode} has invalid email: ${emp.email}`);
-            failed.push({ 
-              employeeCode: emp.employeeCode, 
+            failed.push({
+              employeeCode: emp.employeeCode,
               email: emp.email || null,
-              error: 'Invalid email address' 
+              error: 'Invalid email address'
             });
             continue;
           }
@@ -2511,28 +2531,28 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
           }
 
           // Send reminder email to all active employees (regardless of submission status)
-          const result = await sendDailyPlanReminderEmail({ 
-            recipients: [emp.email], 
-            pendingTasks 
+          const result = await sendDailyPlanReminderEmail({
+            recipients: [emp.email],
+            pendingTasks
           });
 
           if (result?.success) {
             sentCount += 1;
             console.log(`[REMINDER API] ✓ Sent to ${emp.employeeCode} (${emp.email})`);
           } else {
-            failed.push({ 
-              employeeCode: emp.employeeCode, 
+            failed.push({
+              employeeCode: emp.employeeCode,
               email: emp.email,
-              error: result?.error || 'Unknown error' 
+              error: result?.error || 'Unknown error'
             });
             console.error(`[REMINDER API] ✗ Failed for ${emp.employeeCode}: ${result?.error || 'unknown'}`);
           }
         } catch (empErr) {
           console.error(`[REMINDER API] Error processing ${emp.employeeCode}:`, empErr);
-          failed.push({ 
-            employeeCode: emp.employeeCode, 
+          failed.push({
+            employeeCode: emp.employeeCode,
             email: emp.email,
-            error: empErr instanceof Error ? empErr.message : String(empErr) 
+            error: empErr instanceof Error ? empErr.message : String(empErr)
           });
         }
       }
@@ -2540,22 +2560,22 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
       console.log(`[REMINDER API] Summary: Sent=${sentCount}, Failed=${failed.length}`);
 
       if (sentCount === 0 && failed.length > 0) {
-        return res.status(400).json({ 
-          error: "Failed to send any reminder emails", 
-          details: { failed, sentCount } 
+        return res.status(400).json({
+          error: "Failed to send any reminder emails",
+          details: { failed, sentCount }
         });
       }
 
-      return res.json({ 
-        success: true, 
-        count: sentCount, 
+      return res.json({
+        success: true,
+        count: sentCount,
         failed,
         summary: `Sent ${sentCount} reminder(s) to all active employees. ${failed.length} failed.`
       });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error("[REMINDER API] Failed:", err);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "Server error while sending reminders",
         details: process.env.NODE_ENV === 'development' ? errorMsg : undefined
       });
@@ -2641,52 +2661,52 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
 
   app.post("/api/daily-plans/deviations", async (req, res) => {
     try {
-        const { employeeId, taskId, taskName, projectName, reason } = req.body;
-        const date = new Date().toISOString().split('T')[0];
-        const plan = await storage.getDailyPlanByDate(employeeId, date);
-        if (!plan) return res.status(400).json({ error: "Plan for the day must be submitted first." });
+      const { employeeId, taskId, taskName, projectName, reason } = req.body;
+      const date = new Date().toISOString().split('T')[0];
+      const plan = await storage.getDailyPlanByDate(employeeId, date);
+      if (!plan) return res.status(400).json({ error: "Plan for the day must be submitted first." });
 
-        const existingTasks = await storage.getPlanTasks(plan.id);
-        const deviationsCount = existingTasks.filter(t => t.isDeviation).length;
-        if (deviationsCount >= 10) {
-            return res.status(403).json({ error: "Maximum limit of 10 deviations per day reached. Please contact your manager if you need more." });
-        }
+      const existingTasks = await storage.getPlanTasks(plan.id);
+      const deviationsCount = existingTasks.filter(t => t.isDeviation).length;
+      if (deviationsCount >= 10) {
+        return res.status(403).json({ error: "Maximum limit of 10 deviations per day reached. Please contact your manager if you need more." });
+      }
 
-        const task = await storage.createPlanTask({
-            planId: plan.id,
-            taskId,
-            taskName,
-            projectName,
-            isDeviation: true,
-            deviationReason: reason,
-            status: 'pending' 
+      const task = await storage.createPlanTask({
+        planId: plan.id,
+        taskId,
+        taskName,
+        projectName,
+        isDeviation: true,
+        deviationReason: reason,
+        status: 'pending'
+      });
+
+      // Notify manager of deviation
+      try {
+        const { sendDeviationNotificationEmail } = await import('./email');
+        const employee = await storage.getEmployee(employeeId);
+        const emailResult = await sendDeviationNotificationEmail({
+          employeeName: employee?.name || 'Employee',
+          employeeCode: employee?.employeeCode || employeeId,
+          taskName,
+          projectName,
+          reason
         });
-
-        // Notify manager of deviation
-        try {
-          const { sendDeviationNotificationEmail } = await import('./email');
-          const employee = await storage.getEmployee(employeeId);
-          const emailResult = await sendDeviationNotificationEmail({
-             employeeName: employee?.name || 'Employee',
-             employeeCode: employee?.employeeCode || employeeId,
-             taskName,
-             projectName,
-             reason
-          });
-          if (emailResult?.success) {
-            console.log('[EMAIL] Deviation notification email sent successfully');
-          } else {
-            console.error('[EMAIL] Failed to send deviation notification email:', emailResult?.error || 'Unknown error');
-          }
-        } catch (e) {
-          console.error('[EMAIL] Deviation notification failed with exception:', e);
+        if (emailResult?.success) {
+          console.log('[EMAIL] Deviation notification email sent successfully');
+        } else {
+          console.error('[EMAIL] Failed to send deviation notification email:', emailResult?.error || 'Unknown error');
         }
+      } catch (e) {
+        console.error('[EMAIL] Deviation notification failed with exception:', e);
+      }
 
-        broadcast("daily_plan_deviation", { task, employeeId });
-        res.status(201).json(task);
+      broadcast("daily_plan_deviation", { task, employeeId });
+      res.status(201).json(task);
     } catch (error) {
-        console.error("Deviation error:", error);
-        res.status(500).json({ error: "Failed to add deviation" });
+      console.error("Deviation error:", error);
+      res.status(500).json({ error: "Failed to add deviation" });
     }
   });
 
@@ -2767,15 +2787,15 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
   });
 
   app.patch("/api/daily-plans/tasks/:taskId/status", async (req, res) => {
-     try {
-       const { taskId } = req.params;
-       const { status } = req.body; // 'approved' or 'rejected'
-       await storage.updatePlanTask(taskId, { status });
-       res.json({ success: true });
-     } catch (error) {
-       console.error("Update plan task status error:", error);
-       res.status(500).json({ error: "Failed to update status" });
-     }
+    try {
+      const { taskId } = req.params;
+      const { status } = req.body; // 'approved' or 'rejected'
+      await storage.updatePlanTask(taskId, { status });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Update plan task status error:", error);
+      res.status(500).json({ error: "Failed to update status" });
+    }
   });
 
   // Get available PMS tasks grouped by project for the employee's department
@@ -2798,16 +2818,16 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
 
       const viewType = req.query.viewType as string;
 
-      console.log("[AVAILABLE-TASKS] Fetching for employee:", { 
-        name: employee.name, 
-        code: employee.employeeCode, 
+      console.log("[AVAILABLE-TASKS] Fetching for employee:", {
+        name: employee.name,
+        code: employee.employeeCode,
         dept: employee.department,
         role: employee.role,
-        viewType 
+        viewType
       });
 
       let userDepartment = employee.department || '';
-      
+
       // Specific requirement for E0001 Sam Prakash to be presales department
       if (employee.employeeCode === 'E0001' || employee.employeeCode === 'E0000') {
         userDepartment = 'presales';
@@ -2821,17 +2841,17 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
       // (`tm.task_id IS NULL`); to honor "My Tasks" we pass a flag so the helper
       // can drop those unassigned rows for this view.
       let myTasksOnly = false;
-      
+
       // Override for Admin/Manager to get specific views
       if ((employee.role === 'admin' || employee.role === 'manager' || employee.employeeCode === 'E0000' || employee.employeeCode === 'E0001') && viewType) {
-         if (viewType === 'my-tasks') {
-            effectiveRole = 'employee';
-            // effectiveEmpCode remains employee.employeeCode
-            myTasksOnly = true;
-         } else if (viewType === 'department') {
-            effectiveRole = 'employee';
-            effectiveEmpCode = null as any; 
-         }
+        if (viewType === 'my-tasks') {
+          effectiveRole = 'employee';
+          // effectiveEmpCode remains employee.employeeCode
+          myTasksOnly = true;
+        } else if (viewType === 'department') {
+          effectiveRole = 'employee';
+          effectiveEmpCode = null as any;
+        }
       }
 
 
@@ -2864,7 +2884,7 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
       const { getDepartmentTasks } = await import('./pmsSupabase');
       const allProjectTasks = await getDepartmentTasks(userDepartment, effectiveEmpCode, effectiveRole, myTasksOnly);
 
-      
+
       console.log(`[AVAILABLE-TASKS] Found ${allProjectTasks.length} tasks across all projects`);
 
       for (const task of allProjectTasks) {
@@ -3040,7 +3060,7 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
   app.get("/api/reports/eod", async (req, res) => {
     try {
       const { date, startDate, endDate } = req.query;
-      
+
       let targetDates: string[] = [];
       let rangeStart: string;
       let rangeEnd: string;
@@ -3075,13 +3095,13 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
         getBatchLMSHours(rangeStart, rangeEnd),
         storage.getBatchPlanTasksByDateRange(rangeStart, rangeEnd)
       ]);
-      
+
       const parseDurationToMinutes = (duration: string): number => {
         if (!duration) return 0;
         const hMatch = duration.match(/(\d+)h/);
         const mMatch = duration.match(/(\d+)m/);
         const colonMatch = duration.match(/(\d+):(\d+)/);
-        
+
         if (hMatch || mMatch) {
           const h = hMatch ? parseInt(hMatch[1], 10) : 0;
           const m = mMatch ? parseInt(mMatch[1], 10) : 0;
@@ -3099,9 +3119,9 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
       for (const dStr of targetDates) {
         const dateEntries = flatEntries.filter(e => e.date === dStr);
         const dailySubs = flatSubs.filter(s => s.date === dStr);
-        
+
         for (const emp of allEmployees) {
-          if (emp.role === 'admin' && emp.employeeCode === 'ADMIN') continue; 
+          if (emp.role === 'admin' && emp.employeeCode === 'ADMIN') continue;
 
           // Check batch LMS data
           const lmsData = batchLMS[emp.employeeCode]?.[dStr] || {
@@ -3110,33 +3130,33 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
             totalLMSHours: 0,
             details: { leaves: [], permissions: [] }
           };
-          
-          const hasLeave = lmsData.leaveHours >= 4; 
+
+          const hasLeave = lmsData.leaveHours >= 4;
           const isFullLeave = lmsData.leaveHours >= 8;
 
           // Check if final submitted
           const isFinalSubmitted = dailySubs.some(s => s.employeeId === emp.id);
 
-          const empEntries = dateEntries.filter(e => 
-            e.employeeId === emp.id || 
+          const empEntries = dateEntries.filter(e =>
+            e.employeeId === emp.id ||
             (e.employeeCode && e.employeeCode.toUpperCase() === emp.employeeCode.toUpperCase())
           );
 
           // Get planned projects from batchPlanTasks
           let plannedProjects: string[] = [];
           if (empEntries.length === 0) {
-            const empPlanTasks = batchPlanTasks.filter(pt => 
-              pt.daily_plans.employeeId === emp.id && 
+            const empPlanTasks = batchPlanTasks.filter(pt =>
+              pt.daily_plans.employeeId === emp.id &&
               pt.daily_plans.date === dStr
             );
             plannedProjects = Array.from(new Set(empPlanTasks.map(pt => pt.plan_tasks.projectName)));
           }
-          
+
           const totalMinutes = empEntries.reduce((sum, entry) => sum + parseDurationToMinutes(entry.totalHours), 0);
           const totalHours = totalMinutes / 60;
-          
+
           const isSunday = parseISO(dStr).getDay() === 0;
-          
+
           let status = "Not Submitted";
           if (isFinalSubmitted) {
             status = "Submitted";
@@ -3145,7 +3165,7 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
           } else if (empEntries.length > 0) {
             status = "Incomplete";
           } else if (hasLeave) {
-            status = "On Leave"; 
+            status = "On Leave";
           } else if (isSunday) {
             status = "Sunday";
           }
@@ -3204,7 +3224,7 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
   // ============ RAG CHAT & SYNC ROUTES ============
   app.post("/api/rag/chat", async (req, res) => {
     const { message, history, employeeId, employeeCode, role, department, lmsUserId } = req.body;
-    
+
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
