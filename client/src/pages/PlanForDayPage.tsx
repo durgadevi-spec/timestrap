@@ -27,6 +27,8 @@ export default function PlanForDayPage() {
   const [assignedTaskSearch, setAssignedTaskSearch] = useState('');
   const [plannedTaskSearch, setPlannedTaskSearch] = useState('');
   const [projectSearch, setProjectSearch] = useState('');
+  const [projectDropdownSearch, setProjectDropdownSearch] = useState('');
+  const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const [adminViewType, setAdminViewType] = useState<'admin' | 'department' | 'my-tasks'>('admin');
   const [isCalendarPreviewOpen, setIsCalendarPreviewOpen] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -48,7 +50,19 @@ export default function PlanForDayPage() {
     return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
   };
 
-  const durationForRange = (start: string, end: string) => Math.max(15, Math.min(8 * 60, toMinutes(end) - toMinutes(start)));
+  // Get maximum duration allowed for a task based on whether it's a break
+  const getMaxDuration = (taskId: string): number => {
+    if (taskId === 'break-morning' || taskId === 'break-evening') return 15; // 15 minutes max
+    if (taskId === 'break-lunch') return 30; // 30 minutes max
+    return 240; // 240 minutes (4h) max for regular tasks
+  };
+
+  const durationForRange = (start: string, end: string, taskId?: string) => {
+    const calculatedDuration = toMinutes(end) - toMinutes(start);
+    const minDuration = 15;
+    const maxDuration = taskId ? getMaxDuration(taskId) : 8 * 60;
+    return Math.max(minDuration, Math.min(maxDuration, calculatedDuration));
+  };
 
   const buildScheduledTasks = (tasks: any[]) => {
     const startOfDay = 9 * 60;
@@ -61,7 +75,7 @@ export default function PlanForDayPage() {
       const startTime = scheduleData.startTime || task.startTime || toTime(cursor);
       const startMin = toMinutes(startTime);
       const endTime = scheduleData.endTime || task.endTime || toTime(startMin + baseDuration);
-      const durationMinutes = durationForRange(startTime, endTime);
+      const durationMinutes = durationForRange(startTime, endTime, task.id);
       cursor = Math.max(startMin + durationMinutes, toMinutes(endTime));
 
       return {
@@ -109,19 +123,44 @@ export default function PlanForDayPage() {
     setSelectedTasks(prev => buildScheduledTasks(prev.map(task => {
       if (task.id !== taskId) return task;
       const nextSchedule = { ...(task.scheduleData || {}), [field]: value };
+      const maxDuration = getMaxDuration(taskId);
 
       if (field === 'startTime' && nextSchedule.endTime) {
-        nextSchedule.durationMinutes = durationForRange(nextSchedule.startTime, nextSchedule.endTime);
+        const calculatedDuration = toMinutes(nextSchedule.endTime) - toMinutes(value);
+        if (calculatedDuration > maxDuration) {
+          // Clamp the end time to respect the maximum duration
+          const maxEndTime = toTime(toMinutes(value) + maxDuration);
+          nextSchedule.endTime = maxEndTime;
+          toast({
+            title: 'Duration Capped',
+            description: `End time adjusted to ${maxEndTime} to respect ${maxDuration}-minute limit.`,
+            variant: 'destructive',
+          });
+        }
+        nextSchedule.durationMinutes = durationForRange(nextSchedule.startTime, nextSchedule.endTime, taskId);
       }
       if (field === 'endTime' && nextSchedule.startTime) {
-        nextSchedule.durationMinutes = durationForRange(nextSchedule.startTime, nextSchedule.endTime);
+        const calculatedDuration = toMinutes(value) - toMinutes(nextSchedule.startTime);
+        if (calculatedDuration > maxDuration) {
+          // Clamp the end time to the maximum allowed duration
+          const maxEndTime = toTime(toMinutes(nextSchedule.startTime) + maxDuration);
+          nextSchedule.endTime = maxEndTime;
+          toast({
+            title: 'Duration Limit Enforced',
+            description: `${task.task_name} cannot exceed ${maxDuration} minutes. End time capped at ${maxEndTime}.`,
+            variant: 'destructive',
+          });
+        } else {
+          nextSchedule.endTime = value;
+        }
+        nextSchedule.durationMinutes = durationForRange(nextSchedule.startTime, nextSchedule.endTime, taskId);
       }
 
       return {
         ...task,
         scheduleData: nextSchedule,
         ...(field === 'startTime' ? { startTime: value } : {}),
-        ...(field === 'endTime' ? { endTime: value } : {}),
+        ...(field === 'endTime' ? { endTime: nextSchedule.endTime } : {}),
       };
     })));
   };
@@ -135,13 +174,28 @@ export default function PlanForDayPage() {
       return;
     }
 
+    // Check if extension would exceed maximum duration
+    const maxDuration = getMaxDuration(taskId);
+    const currentEndMin = toMinutes(target?.endTime || '09:00');
+    const proposedEndMin = currentEndMin + 30;
+    const proposedDurationMin = proposedEndMin - toMinutes(target?.startTime || '09:00');
+    
+    if (proposedDurationMin > maxDuration) {
+      toast({
+        title: 'Cannot Extend',
+        description: `Extension would exceed the ${maxDuration}-minute limit for ${target?.task_name}. Current duration: ${target?.durationMinutes || 30}m, Max allowed: ${maxDuration}m`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setSelectedTasks(prev => buildScheduledTasks(prev.map(task => {
       if (task.id !== taskId) return task;
       const updatedEnd = toMinutes(task.endTime) + 30;
       const nextSchedule = {
         ...(task.scheduleData || {}),
         endTime: toTime(updatedEnd),
-        durationMinutes: durationForRange(task.startTime, toTime(updatedEnd)),
+        durationMinutes: durationForRange(task.startTime, toTime(updatedEnd), taskId),
         extensionReason: reason,
       };
 
@@ -210,6 +264,23 @@ export default function PlanForDayPage() {
     },
   });
 
+  // Fetch all projects user has access to (including created ones)
+  const { data: allAccessibleProjects = [] } = useQuery({
+    queryKey: ['/api/projects', user?.employeeCode, user?.role, user?.department],
+    enabled: !!user?.id,
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        userRole: user?.role || "",
+        userEmpCode: user?.employeeCode || "",
+        userDepartment: user?.department || "",
+      });
+      const res = await fetch(`/api/projects?${params.toString()}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    },
+  });
+
   const isWindowOpen = !!windowData?.planWindowOpen;
   const isPastCutoff = !!windowData?.isPastCutoff;
   const isOverrideToday = !!windowData?.isOverrideToday;
@@ -242,6 +313,31 @@ export default function PlanForDayPage() {
     setProjectSearch('');
   }, []);
 
+  // Close project dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (isProjectDropdownOpen && !target.closest('[data-project-dropdown]')) {
+        setIsProjectDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isProjectDropdownOpen]);
+
+  // Position project dropdown below button
+  useEffect(() => {
+    if (isProjectDropdownOpen) {
+      const button = document.querySelector('[data-project-dropdown] button');
+      if (button) {
+        const rect = button.getBoundingClientRect();
+        const style = document.documentElement.style;
+        style.setProperty('--dropdown-top', `${rect.bottom + 8}px`);
+        style.setProperty('--dropdown-left', `${rect.left}px`);
+      }
+    }
+  }, [isProjectDropdownOpen]);
+
   useEffect(() => {
     if (availableTasks.length === 0) return;
 
@@ -262,9 +358,33 @@ export default function PlanForDayPage() {
     if (!planStatus?.submitted && selectedTasks.length === 0) {
       const autoTasks = availableTasks.filter((task: any) => task.isAutoSelected);
       const breaks = [
-        { id: 'break-morning', task_name: 'Morning Break', projectName: 'Break', isBreak: true, durationMinutes: 15 },
-        { id: 'break-lunch', task_name: 'Lunch', projectName: 'Break', isBreak: true, durationMinutes: 30 },
-        { id: 'break-evening', task_name: 'Evening Break', projectName: 'Break', isBreak: true, durationMinutes: 15 }
+        { 
+          id: 'break-morning', 
+          task_name: 'Morning Break', 
+          projectName: 'Break', 
+          isBreak: true, 
+          durationMinutes: 15,
+          startTime: '11:00',
+          endTime: '11:15'
+        },
+        { 
+          id: 'break-lunch', 
+          task_name: 'Lunch', 
+          projectName: 'Break', 
+          isBreak: true, 
+          durationMinutes: 30,
+          startTime: '14:00',
+          endTime: '14:30'
+        },
+        { 
+          id: 'break-evening', 
+          task_name: 'Evening Break', 
+          projectName: 'Break', 
+          isBreak: true, 
+          durationMinutes: 15,
+          startTime: '17:00',
+          endTime: '17:15'
+        }
       ];
       if (autoTasks.length > 0 || breaks.length > 0) {
         setSelectedTasks(buildScheduledTasks([...breaks, ...autoTasks]));
@@ -325,10 +445,27 @@ export default function PlanForDayPage() {
     const matchesSearch = task.task_name.toLowerCase().includes(assignedTaskSearch.toLowerCase()) ||
                           task.projectName.toLowerCase().includes(assignedTaskSearch.toLowerCase());
     const matchesProject = projectSearch === '' || task.projectName === projectSearch;
-    return matchesSearch && matchesProject && !task.isAutoSelected;
+    
+    // Filter for "My Tasks" - only show tasks assigned to current user or containing user's name
+    let matchesViewType = true;
+    if (adminViewType === 'my-tasks') {
+      const userCode = user?.employeeCode || '';
+      const userName = user?.name || '';
+      const taskAssignedTo = task.assignedTo || '';
+      const taskName = task.task_name?.toLowerCase() || '';
+      
+      matchesViewType = taskAssignedTo === userCode || 
+                       taskName.includes(userName.toLowerCase()) ||
+                       task.isAssignedToEmployee === true;
+    }
+    
+    return matchesSearch && matchesProject && matchesViewType && !task.isAutoSelected;
   });
 
-  const uniqueProjects = Array.from(new Set(availableTasks.map((t: any) => t.projectName))).filter(Boolean).sort();
+  const uniqueProjects = Array.from(new Set([
+    ...availableTasks.map((t: any) => t.projectName).filter(Boolean),
+    ...allAccessibleProjects.map((p: any) => p.project_name).filter(Boolean)
+  ])).sort();
 
   const filteredSelectedTasks = selectedTasks.filter((task: any) =>
     task.task_name.toLowerCase().includes(plannedTaskSearch.toLowerCase()) ||
@@ -527,21 +664,65 @@ export default function PlanForDayPage() {
                     <PlannedTaskSearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                     <Input placeholder="Search tasks..." value={assignedTaskSearch} onChange={(e) => setAssignedTaskSearch(e.target.value)} className="bg-slate-950/50 border-slate-800 pl-10 h-10" />
                   </div>
-                  <div className="relative flex-1">
-                    <select 
-                      value={projectSearch} 
-                      onChange={(e) => setProjectSearch(e.target.value)}
-                      className="w-full h-10 rounded-md border border-slate-800 bg-slate-950/50 px-3 py-2 text-sm text-slate-200 outline-none cursor-pointer focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                      style={{ WebkitAppearance: 'none', MozAppearance: 'none', appearance: 'none' }}
+                  <div className="relative flex-1 z-30" data-project-dropdown>
+                    <button 
+                      onClick={() => setIsProjectDropdownOpen(!isProjectDropdownOpen)}
+                      className="w-full h-10 rounded-md border border-slate-800 bg-slate-950/50 px-3 py-2 text-sm text-slate-200 outline-none cursor-pointer focus:border-blue-500 focus:ring-1 focus:ring-blue-500 flex items-center justify-between hover:border-slate-700 transition-colors"
                     >
-                      <option value="" style={{ background: '#0f172a', color: '#e2e8f0' }}>All Projects</option>
-                      {uniqueProjects.map((p: any) => (
-                        <option key={p as string} value={p as string} style={{ background: '#0f172a', color: '#e2e8f0', padding: '8px' }}>{p as string}</option>
-                      ))}
-                    </select>
-                    <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
-                      <ArrowDown className="w-3 h-3 text-slate-500" />
-                    </div>
+                      <span>{projectSearch ? projectSearch : 'All Projects'}</span>
+                      <ArrowDown className={`w-3 h-3 text-slate-500 transition-transform ${isProjectDropdownOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {isProjectDropdownOpen && (
+                      <div className="fixed bg-slate-900 border border-slate-700 rounded-md shadow-xl z-50 w-80" style={{
+                        top: 'var(--dropdown-top)',
+                        left: 'var(--dropdown-left)',
+                      }}>
+                        <div className="p-3 border-b border-slate-700">
+                          <Input 
+                            placeholder="Search projects..." 
+                            value={projectDropdownSearch}
+                            onChange={(e) => setProjectDropdownSearch(e.target.value)}
+                            className="bg-slate-950 border-slate-700 h-9 text-sm placeholder-slate-500"
+                          />
+                        </div>
+                        <div className="max-h-72 overflow-y-auto">
+                          <div className="p-2 space-y-1">
+                            <button
+                              onClick={() => {
+                                setProjectSearch('');
+                                setIsProjectDropdownOpen(false);
+                                setProjectDropdownSearch('');
+                              }}
+                              className="w-full text-left px-3 py-2 rounded text-sm text-slate-300 hover:bg-slate-800 transition-colors"
+                            >
+                              All Projects
+                            </button>
+                            {uniqueProjects
+                              .filter(p => p.toLowerCase().includes(projectDropdownSearch.toLowerCase()))
+                              .map((p: any) => (
+                                <button
+                                  key={p as string}
+                                  onClick={() => {
+                                    setProjectSearch(p as string);
+                                    setIsProjectDropdownOpen(false);
+                                    setProjectDropdownSearch('');
+                                  }}
+                                  className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
+                                    projectSearch === p 
+                                      ? 'bg-blue-600/40 text-blue-200 font-semibold' 
+                                      : 'text-slate-300 hover:bg-slate-800'
+                                  }`}
+                                >
+                                  {p as string}
+                                </button>
+                              ))}
+                            {uniqueProjects.filter(p => p.toLowerCase().includes(projectDropdownSearch.toLowerCase())).length === 0 && (
+                              <div className="px-3 py-2 text-xs text-slate-500 text-center">No projects found</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardHeader>

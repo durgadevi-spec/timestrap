@@ -6,6 +6,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { ThemeProvider } from '@/context/ThemeContext';
 import WelcomePage from '@/components/WelcomePage';
 import LoginCard from '@/components/LoginCard';
 import ForgotPasswordModal from '@/components/ForgotPasswordModal';
@@ -208,19 +209,21 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <AuthProvider>
-          <Switch>
-            <Route path="/privacy-policy">
-              <PrivacyPolicy />
-            </Route>
-            <Route path="/terms-of-service">
-              <TermsOfService />
-            </Route>
-            <Route>
-              <AppContent />
-            </Route>
-          </Switch>
-          <MascotDolls />
-          <Toaster />
+          <ThemeProvider>
+            <Switch>
+              <Route path="/privacy-policy">
+                <PrivacyPolicy />
+              </Route>
+              <Route path="/terms-of-service">
+                <TermsOfService />
+              </Route>
+              <Route>
+                <AppContent />
+              </Route>
+            </Switch>
+            <MascotDolls />
+            <Toaster />
+          </ThemeProvider>
         </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
