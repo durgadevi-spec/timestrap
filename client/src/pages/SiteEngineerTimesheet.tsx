@@ -443,7 +443,7 @@ export default function SiteEngineerTimesheet() {
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-12 p-4 md:p-8 w-full">
           <div className="space-y-12 w-full">
             {/* Consolidated Site Context & User Info */}
-            <Card className="bg-slate-900/50 backdrop-blur-xl border-white/5 rounded-3xl overflow-hidden shadow-2xl">
+            <Card className="bg-slate-900/50 backdrop-blur-xl border-white/5 rounded-3xl overflow-hidden shadow-2xl site-report-card">
               <div className="p-5 md:p-6 space-y-6">
                 <div className="flex flex-col md:flex-row items-center justify-between gap-4 border-b border-white/5 pb-4">
                   <div className="flex items-center gap-3">
@@ -556,7 +556,7 @@ export default function SiteEngineerTimesheet() {
 
             {/* Observations & Progress */}
             {/* Observations & Progress */}
-            <Card className="bg-slate-900/50 backdrop-blur-xl border-white/5 rounded-3xl overflow-hidden shadow-2xl">
+            <Card className="bg-slate-900/50 backdrop-blur-xl border-white/5 rounded-3xl overflow-hidden shadow-2xl site-report-card">
               <div className="p-5 md:p-6 space-y-6">
                 <div className="flex items-center gap-3 border-b border-white/5 pb-4">
                   <div className="p-2 bg-indigo-500/20 rounded-xl">
@@ -676,7 +676,7 @@ export default function SiteEngineerTimesheet() {
               {/* Location + Evidence side by side */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {/* Live Site Location */}
-              <Card className="bg-slate-900/50 backdrop-blur-xl border-white/5 rounded-3xl overflow-hidden shadow-2xl">
+              <Card className="bg-slate-900/50 backdrop-blur-xl border-white/5 rounded-3xl overflow-hidden shadow-2xl site-report-card site-report-card-location">
                 <CardHeader className="bg-gradient-to-r from-orange-500/10 to-amber-500/10 border-b border-white/5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -752,7 +752,7 @@ export default function SiteEngineerTimesheet() {
               </Card>
 
               {/* Evidence & Documents */}
-              <Card className="bg-slate-900/50 backdrop-blur-xl border-white/5 rounded-3xl overflow-hidden shadow-2xl">
+              <Card className="bg-slate-900/50 backdrop-blur-xl border-white/5 rounded-3xl overflow-hidden shadow-2xl site-report-card">
                 <CardHeader className="bg-gradient-to-r from-indigo-500/10 to-violet-500/10 border-b border-white/5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -807,7 +807,7 @@ export default function SiteEngineerTimesheet() {
               </div>
 
               {/* Email Distribution */}
-              <Card className="bg-slate-900/50 backdrop-blur-xl border-white/5 rounded-3xl overflow-hidden shadow-2xl">
+              <Card className="bg-slate-900/50 backdrop-blur-xl border-white/5 rounded-3xl overflow-hidden shadow-2xl site-report-card">
                 <CardHeader className="bg-gradient-to-r from-violet-500/10 to-purple-500/10 border-b border-white/5">
                   <div className="flex items-center gap-2">
                     <div className="p-2 bg-violet-500/20 rounded-xl">

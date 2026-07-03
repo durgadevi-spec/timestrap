@@ -303,9 +303,9 @@ export const getTasks = async (projectId?: string, userDepartment?: string, user
   }
 };
 
-export const getDepartmentTasks = async (userDepartment: string, userEmpCode: string, userRole: string): Promise<any[]> => {
+export const getDepartmentTasks = async (userDepartment: string, userEmpCode: string, userRole: string, myTasksOnly: boolean = false): Promise<any[]> => {
   try {
-    console.log("📡 Executing PMS getDepartmentTasks query for dept:", userDepartment);
+    console.log("📡 Executing PMS getDepartmentTasks query for dept:", userDepartment, "myTasksOnly:", myTasksOnly);
     
     const isAdmin = userRole === 'admin' || userEmpCode === 'E0001' || userEmpCode === 'E0000';
     
@@ -319,20 +319,49 @@ export const getDepartmentTasks = async (userDepartment: string, userEmpCode: st
       return acc;
     }, {} as Record<string, any>);
 
-    // Fetch all tasks for these projects that the user can see
-    const query = `
-      SELECT DISTINCT pt.*, pt.schedule_type, pt.schedule_data FROM project_tasks pt
-      INNER JOIN projects p ON pt.project_id = p.id
-      LEFT JOIN task_members tm ON pt.id = tm.task_id
-      LEFT JOIN employees e ON tm.employee_id = e.id
-      WHERE pt.project_id = ANY($1)
-        AND (pt.status IS NULL OR LOWER(pt.status) != 'completed')
-        AND (LOWER(TRIM(e.emp_code)) = LOWER(TRIM($2)) OR $2 IS NULL OR $3 = TRUE OR tm.task_id IS NULL)
-      ORDER BY pt.task_name
-    `;
-    
-    const result: QueryResult = await pmsPool.query(query, [projectIds, userEmpCode || null, isAdmin]);
+    // Build WHERE clause for task visibility.
+    // Default: include tasks where the user is a task member OR the task is unassigned
+    // (so admins/managers still see department-wide work).
+    // When myTasksOnly is true, only return tasks where the user is explicitly a
+    // task member — drop unassigned rows so the "My Tasks" view only lists
+    // tasks the user personally owns.
+    //
+    // IMPORTANT: the number of placeholders ($1, $2, $3) must match the number
+    // of parameters we pass to pmsPool.query, so we build both the clause and
+    // the params together.
+    let query: string;
+    let queryParams: any[];
+    if (myTasksOnly) {
+      // Only two placeholders needed: projectIds ($1) and userEmpCode ($2)
+      query = `
+        SELECT DISTINCT pt.*, pt.schedule_type, pt.schedule_data FROM project_tasks pt
+        INNER JOIN projects p ON pt.project_id = p.id
+        LEFT JOIN task_members tm ON pt.id = tm.task_id
+        LEFT JOIN employees e ON tm.employee_id = e.id
+        WHERE pt.project_id = ANY($1)
+          AND (pt.status IS NULL OR LOWER(pt.status) != 'completed')
+          AND LOWER(TRIM(e.emp_code)) = LOWER(TRIM($2))
+        ORDER BY pt.task_name
+      `;
+      queryParams = [projectIds, userEmpCode || null];
+    } else {
+      // Original three-placeholder clause (unchanged behavior)
+      query = `
+        SELECT DISTINCT pt.*, pt.schedule_type, pt.schedule_data FROM project_tasks pt
+        INNER JOIN projects p ON pt.project_id = p.id
+        LEFT JOIN task_members tm ON pt.id = tm.task_id
+        LEFT JOIN employees e ON tm.employee_id = e.id
+        WHERE pt.project_id = ANY($1)
+          AND (pt.status IS NULL OR LOWER(pt.status) != 'completed')
+          AND (LOWER(TRIM(e.emp_code)) = LOWER(TRIM($2)) OR $2 IS NULL OR $3 = TRUE OR tm.task_id IS NULL)
+        ORDER BY pt.task_name
+      `;
+      queryParams = [projectIds, userEmpCode || null, isAdmin];
+    }
+
+    const result: QueryResult = await pmsPool.query(query, queryParams);
     const tasks = result.rows || [];
+
 
     // Enrich tasks with project info
     return tasks.map(task => ({
@@ -343,6 +372,7 @@ export const getDepartmentTasks = async (userDepartment: string, userEmpCode: st
     console.error("💥 Error in getDepartmentTasks:", error);
     return [];
   }
+
 };
 
 export const getTasksByProject = async (projectId: string, userDepartment?: string, userEmpCode?: string, userRole?: string): Promise<PMSTask[]> => {

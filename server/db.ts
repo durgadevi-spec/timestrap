@@ -3,6 +3,9 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@shared/schema";
 
+// Prevent pg from parsing DATE (1082) into local JS Date objects (prevents timezone shifting)
+pg.types.setTypeParser(1082, (val) => val);
+
 const { Pool } = pg;
 
 /* ================================

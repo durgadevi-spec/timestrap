@@ -877,7 +877,7 @@ function CornerBuddy({ typing, soundOn, activeBuddyId, onSwitchBuddy, currentUse
     const [show, setShow] = useState(false);
     const [bounce, setBounce] = useState(false);
     const [selectorOpen, setSelectorOpen] = useState(false);
-    
+
     const activeMember = TEAM.find(m => m.id === activeBuddyId) || TEAM[0];
     const iconFn = SvgIcons[activeMember.iconKey];
 
@@ -901,127 +901,127 @@ function CornerBuddy({ typing, soundOn, activeBuddyId, onSwitchBuddy, currentUse
 
     return (
         <>
-        {/* Left Corner Squad (Secondary Buddies) */}
-        <div className="fixed bottom-5 left-5 z-[60] flex items-end gap-2 pointer-events-none">
-            {squad.map((m, i) => (
-                <motion.div
-                    key={m.id}
-                    initial={{ opacity: 0, x: -20, scale: 0.8 }}
-                    animate={{ opacity: 1, x: 0, scale: 1 }}
-                    transition={{ delay: i * 0.15 }}
-                    className="relative group/squad"
-                >
-                    <AvatarCard member={m} size={42} wiggle={typing} floatAnim={!typing} />
-                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover/squad:opacity-100 transition-opacity bg-slate-900 text-[8px] font-black text-white px-2 py-0.5 rounded-full whitespace-nowrap border border-white/10 shadow-xl">
-                        {m.name}
-                    </div>
-                </motion.div>
-            ))}
-        </div>
-
-        {/* Right Corner Guide (Main Buddy) */}
-        <div className="fixed bottom-5 right-5 z-[60] flex flex-col items-end gap-3 group">
-            {/* Bubble */}
-            <AnimatePresence>
-            {show && (
-                <motion.div 
-                    initial={{ opacity: 0, scale: 0.8, y: 10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.8, y: 5 }}
-                    className="px-3 py-2 rounded-2xl text-[11px] font-black text-white shadow-2xl max-w-[190px] text-center mb-1 mr-2 relative"
-                    style={{
-                        background: `linear-gradient(135deg,${activeMember.bgFrom},${activeMember.bgTo}ee)`,
-                        border: `1.5px solid ${activeMember.deptColor}55`, 
-                        boxShadow: `0 12px 40px ${activeMember.deptColor}60`,
-                    }}>
-                    <div className="flex items-center justify-center gap-1.5 mb-1">
-                        {iconFn && iconFn(18)}
-                        <span>{bubble}</span>
-                    </div>
-                    {/* Tiny sparkle */}
-                    <div className="absolute -top-1 -right-1 animate-pulse">✨</div>
-                </motion.div>
-            )}
-            </AnimatePresence>
-
-            {/* Buddy Selector Panel */}
-            <AnimatePresence>
-            {selectorOpen && (
-                <motion.div 
-                    initial={{ opacity: 0, y: 30, scale: 0.8 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 20, scale: 0.8 }}
-                    className="absolute bottom-24 right-0 grid grid-cols-4 gap-2 p-4 bg-slate-900/95 backdrop-blur-2xl border border-white/20 rounded-[2.5rem] shadow-[0_32px_64px_rgba(0,0,0,0.8)] w-[280px] ring-1 ring-white/10"
-                >
-                    <div className="col-span-4 text-[10px] font-black text-slate-400 mb-1 px-1 flex items-center justify-between">
-                        <span>SELECT YOUR GUIDE</span>
-                        <X className="w-3 h-3 cursor-pointer" onClick={() => setSelectorOpen(false)} />
-                    </div>
-                    {TEAM.map(m => (
-                        <button 
-                            key={m.id}
-                            onClick={() => { onSwitchBuddy(m.id); setSelectorOpen(false); if (soundOn) playSound('success'); }}
-                            className={`relative p-1.5 rounded-2xl transition-all hover:scale-125 active:scale-90 ${activeBuddyId === m.id ? 'bg-white/20 ring-2 ring-white/40 z-10' : 'hover:bg-white/10'}`}
-                        >
-                            <img 
-                                src={buildAnimeAvatarUrl(m)} 
-                                alt={m.name} 
-                                className="w-12 h-12 rounded-full object-cover shadow-lg"
-                                style={{ background: m.deptColor + '40' }}
-                            />
-                            <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-slate-800 flex items-center justify-center border border-white/30 shadow-md">
-                                {SvgIcons[m.iconKey](12)}
-                            </div>
-                        </button>
-                    ))}
-                </motion.div>
-            )}
-            </AnimatePresence>
-
-            <div className="relative flex items-end">
-                {/* Peer Buddies (Smaller version of squad members next to main buddy) */}
-                <div className="flex -space-x-3 mr-1">
-                    {squad.map((m, i) => (
-                        <motion.div 
-                            key={m.id}
-                            initial={{ opacity: 0, x: 10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: 0.2 + i * 0.1 }}
-                            className="relative z-0 scale-75 grayscale hover:grayscale-0 hover:scale-110 transition-all cursor-help"
-                        >
-                            <AvatarCard member={m} size={40} floatAnim={true} />
-                        </motion.div>
-                    ))}
-                </div>
-
-                {/* Main Buddy */}
-                <div className="relative">
-                    <motion.div 
-                        onClick={pop} 
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        className="cursor-pointer select-none relative z-10" 
-                        title={`${activeMember.name} — Employee`}
+            {/* Left Corner Squad (Secondary Buddies) */}
+            <div className="fixed bottom-5 left-5 z-[60] flex items-end gap-2 pointer-events-none">
+                {squad.map((m, i) => (
+                    <motion.div
+                        key={m.id}
+                        initial={{ opacity: 0, x: -20, scale: 0.8 }}
+                        animate={{ opacity: 1, x: 0, scale: 1 }}
+                        transition={{ delay: i * 0.15 }}
+                        className="relative group/squad"
                     >
-                        <AvatarCard member={activeMember} size={84} wiggle={typing} bounce={bounce} floatAnim={!typing && !bounce} />
+                        <AvatarCard member={m} size={42} wiggle={typing} floatAnim={!typing} />
+                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover/squad:opacity-100 transition-opacity bg-slate-900 text-[8px] font-black text-white px-2 py-0.5 rounded-full whitespace-nowrap border border-white/10 shadow-xl">
+                            {m.name}
+                        </div>
                     </motion.div>
+                ))}
+            </div>
 
-                    {/* Selector Toggle Icon - Pulsing for visibility */}
-                    <button 
-                        onClick={(e) => { e.stopPropagation(); setSelectorOpen(!selectorOpen); if (soundOn) playSound('woosh'); }}
-                        className="absolute -top-1 -left-1 w-10 h-10 rounded-full bg-slate-900/80 backdrop-blur-md border border-white/20 flex items-center justify-center text-white z-20 hover:bg-white/20 hover:scale-125 transition-all shadow-[0_8px_24px_rgba(0,0,0,0.5)] animate-pulse"
-                    >
-                        <RefreshCw className={`w-5 h-5 ${selectorOpen ? 'rotate-180' : ''} transition-transform duration-500`} />
-                    </button>
-                    
-                    {/* Role Label */}
-                    <div className="absolute -bottom-3 right-1/2 translate-x-1/2 whitespace-nowrap px-3 py-1 rounded-full text-[9px] font-black text-white z-20 shadow-2xl skew-x-[-10deg]"
-                         style={{ background: activeMember.deptColor, border: '1px solid white/20' }}>
-                        EMPLOYEE GUIDE ✨
+            {/* Right Corner Guide (Main Buddy) */}
+            <div className="fixed bottom-5 right-5 z-[60] flex flex-col items-end gap-3 group">
+                {/* Bubble */}
+                <AnimatePresence>
+                    {show && (
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.8, y: 5 }}
+                            className="px-3 py-2 rounded-2xl text-[11px] font-black text-white shadow-2xl max-w-[190px] text-center mb-1 mr-2 relative"
+                            style={{
+                                background: `linear-gradient(135deg,${activeMember.bgFrom},${activeMember.bgTo}ee)`,
+                                border: `1.5px solid ${activeMember.deptColor}55`,
+                                boxShadow: `0 12px 40px ${activeMember.deptColor}60`,
+                            }}>
+                            <div className="flex items-center justify-center gap-1.5 mb-1">
+                                {iconFn && iconFn(18)}
+                                <span>{bubble}</span>
+                            </div>
+                            {/* Tiny sparkle */}
+                            <div className="absolute -top-1 -right-1 animate-pulse">✨</div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                {/* Buddy Selector Panel */}
+                <AnimatePresence>
+                    {selectorOpen && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 30, scale: 0.8 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 20, scale: 0.8 }}
+                            className="absolute bottom-24 right-0 grid grid-cols-4 gap-2 p-4 bg-slate-900/95 backdrop-blur-2xl border border-white/20 rounded-[2.5rem] shadow-[0_32px_64px_rgba(0,0,0,0.8)] w-[280px] ring-1 ring-white/10"
+                        >
+                            <div className="col-span-4 text-[10px] font-black text-slate-400 mb-1 px-1 flex items-center justify-between">
+                                <span>SELECT YOUR GUIDE</span>
+                                <X className="w-3 h-3 cursor-pointer" onClick={() => setSelectorOpen(false)} />
+                            </div>
+                            {TEAM.map(m => (
+                                <button
+                                    key={m.id}
+                                    onClick={() => { onSwitchBuddy(m.id); setSelectorOpen(false); if (soundOn) playSound('success'); }}
+                                    className={`relative p-1.5 rounded-2xl transition-all hover:scale-125 active:scale-90 ${activeBuddyId === m.id ? 'bg-white/20 ring-2 ring-white/40 z-10' : 'hover:bg-white/10'}`}
+                                >
+                                    <img
+                                        src={buildAnimeAvatarUrl(m)}
+                                        alt={m.name}
+                                        className="w-12 h-12 rounded-full object-cover shadow-lg"
+                                        style={{ background: m.deptColor + '40' }}
+                                    />
+                                    <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-slate-800 flex items-center justify-center border border-white/30 shadow-md">
+                                        {SvgIcons[m.iconKey](12)}
+                                    </div>
+                                </button>
+                            ))}
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                <div className="relative flex items-end">
+                    {/* Peer Buddies (Smaller version of squad members next to main buddy) */}
+                    <div className="flex -space-x-3 mr-1">
+                        {squad.map((m, i) => (
+                            <motion.div
+                                key={m.id}
+                                initial={{ opacity: 0, x: 10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: 0.2 + i * 0.1 }}
+                                className="relative z-0 scale-75 grayscale hover:grayscale-0 hover:scale-110 transition-all cursor-help"
+                            >
+                                <AvatarCard member={m} size={40} floatAnim={true} />
+                            </motion.div>
+                        ))}
+                    </div>
+
+                    {/* Main Buddy */}
+                    <div className="relative">
+                        <motion.div
+                            onClick={pop}
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            className="cursor-pointer select-none relative z-10"
+                            title={`${activeMember.name} — Employee`}
+                        >
+                            <AvatarCard member={activeMember} size={84} wiggle={typing} bounce={bounce} floatAnim={!typing && !bounce} />
+                        </motion.div>
+
+                        {/* Selector Toggle Icon - Pulsing for visibility */}
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setSelectorOpen(!selectorOpen); if (soundOn) playSound('woosh'); }}
+                            className="absolute -top-1 -left-1 w-10 h-10 rounded-full bg-slate-900/80 backdrop-blur-md border border-white/20 flex items-center justify-center text-white z-20 hover:bg-white/20 hover:scale-125 transition-all shadow-[0_8px_24px_rgba(0,0,0,0.5)] animate-pulse"
+                        >
+                            <RefreshCw className={`w-5 h-5 ${selectorOpen ? 'rotate-180' : ''} transition-transform duration-500`} />
+                        </button>
+
+                        {/* Role Label */}
+                        <div className="absolute -bottom-3 right-1/2 translate-x-1/2 whitespace-nowrap px-3 py-1 rounded-full text-[9px] font-black text-white z-20 shadow-2xl skew-x-[-10deg]"
+                            style={{ background: activeMember.deptColor, border: '1px solid white/20' }}>
+                            EMPLOYEE GUIDE ✨
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
         </>
     );
 }
@@ -1464,7 +1464,7 @@ export default function TaskEntryPage() {
                     </div>
                 </div>
             </div>
-      {/* Plan alert removed as per user request to allow entry without plan */}
+            {/* Plan alert removed as per user request to allow entry without plan */}
         </>
     );
 }
@@ -1543,3 +1543,4 @@ const ALL_KEYFRAMES = `
     50%    { transform:scale(1.45); opacity:.7; }
   }
 `;
+

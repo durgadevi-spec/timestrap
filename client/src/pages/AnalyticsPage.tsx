@@ -468,7 +468,7 @@ export default function AnalyticsPage({ user }: AnalyticsPageProps) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-gradient-to-br from-blue-600/20 to-cyan-600/20 border-blue-500/30">
+        <Card className="bg-gradient-to-br from-blue-600/20 to-cyan-600/20 border-blue-500/30 analytics-kpi-card">
           <CardContent className="pt-6">
             <div className="flex items-center gap-4">
               <div className="p-3 rounded-xl bg-blue-500/20">
@@ -482,7 +482,7 @@ export default function AnalyticsPage({ user }: AnalyticsPageProps) {
           </CardContent>
         </Card>
 
-        <Card className="bg-slate-800/50 border-blue-500/20">
+        <Card className="bg-slate-800/50 border-blue-500/20 analytics-kpi-card">
           <CardContent className="pt-6">
             <div className="flex items-center gap-4">
               <div className="p-3 rounded-xl bg-green-500/20">
@@ -498,7 +498,7 @@ export default function AnalyticsPage({ user }: AnalyticsPageProps) {
           </CardContent>
         </Card>
 
-        <Card className="bg-slate-800/50 border-blue-500/20">
+        <Card className="bg-slate-800/50 border-blue-500/20 analytics-kpi-card">
           <CardContent className="pt-6">
             <div className="flex items-center gap-4">
               <div className="p-3 rounded-xl bg-purple-500/20">
@@ -512,7 +512,7 @@ export default function AnalyticsPage({ user }: AnalyticsPageProps) {
           </CardContent>
         </Card>
 
-        <Card className="bg-slate-800/50 border-blue-500/20">
+        <Card className="bg-slate-800/50 border-blue-500/20 analytics-kpi-card">
           <CardContent className="pt-6">
             <div className="flex items-center gap-4">
               <div className="p-3 rounded-xl bg-orange-500/20">
@@ -598,7 +598,7 @@ export default function AnalyticsPage({ user }: AnalyticsPageProps) {
                 {weeklyData.days.map(({ day, dateStr, hours, productivity, total }) => (
                   <div
                     key={day}
-                    className={`p-4 rounded-lg border text-center transition-colors ${total > 0
+                    className={`analytics-weekly-card p-4 rounded-lg border text-center transition-colors ${total > 0
                         ? 'bg-blue-500/10 border-blue-500/30'
                         : 'bg-slate-700/20 border-blue-500/10'
                       }`}
@@ -619,7 +619,7 @@ export default function AnalyticsPage({ user }: AnalyticsPageProps) {
             </CardContent>
           </Card>
 
-          <Card className="bg-slate-800/50 border-blue-500/20">
+          <Card className="bg-slate-800/50 border-blue-500/20 analytics-activity-table-card">
             <CardHeader className="flex flex-row items-center justify-between pb-2 border-b border-blue-500/10">
               <div>
                 <CardTitle className="text-lg text-white flex items-center gap-2">

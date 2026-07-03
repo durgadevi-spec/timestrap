@@ -188,7 +188,7 @@ export default function RejectionsPage({ user }: RejectionsPageProps) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="bg-slate-800/50 border-blue-500/20 p-4">
+        <Card className="bg-slate-800/50 border-blue-500/20 p-4 rejection-stat-card">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-blue-500/20">
               <AlertCircle className="w-5 h-5 text-blue-400" />
@@ -200,7 +200,7 @@ export default function RejectionsPage({ user }: RejectionsPageProps) {
           </div>
         </Card>
 
-        <Card className="bg-slate-800/50 border-red-500/20 p-4">
+        <Card className="bg-slate-800/50 border-red-500/20 p-4 rejection-stat-card">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-red-500/20">
               <X className="w-5 h-5 text-red-400" />
@@ -212,7 +212,7 @@ export default function RejectionsPage({ user }: RejectionsPageProps) {
           </div>
         </Card>
 
-        <Card className="bg-slate-800/50 border-orange-500/20 p-4">
+        <Card className="bg-slate-800/50 border-orange-500/20 p-4 rejection-stat-card">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-orange-500/20">
               <Clock className="w-5 h-5 text-orange-400" />
@@ -225,7 +225,7 @@ export default function RejectionsPage({ user }: RejectionsPageProps) {
         </Card>
       </div>
 
-      <Card className="bg-slate-800/50 border-blue-500/20 p-4">
+      <Card className="bg-slate-800/50 border-blue-500/20 p-4 rejection-filter-bar">
         <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
           <div className="flex flex-col sm:flex-row gap-4 flex-1 w-full md:w-auto">
             <div className="relative flex-1 max-w-sm">
@@ -313,7 +313,7 @@ export default function RejectionsPage({ user }: RejectionsPageProps) {
             const resubmittedCount = group.entries.filter(e => e.status === 'resubmitted').length;
 
             return (
-              <Card key={group.employeeId} className="bg-slate-800/50 border-blue-500/20 overflow-hidden">
+              <Card key={group.employeeId} className="bg-slate-800/50 border-blue-500/20 overflow-hidden rejection-employee-card">
                 <div
                   className="p-4 cursor-pointer hover:bg-slate-700/30 transition-colors"
                   onClick={() => setExpandedEmployee(isExpanded ? null : group.employeeId)}

@@ -130,74 +130,76 @@ export default function AnalyticsPanel({
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <Card className="bg-slate-800/50 border-blue-500/20">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-blue-200">Work Distribution</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {totalMinutes > 0 ? (
-            <div className="h-48" data-testid="chart-work-distribution">
-              <Doughnut data={workDistributionData} options={chartOptions} />
-            </div>
-          ) : (
-            <div className="h-48 flex items-center justify-center text-slate-500 text-sm">
-              No tracked time data available
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="bg-slate-800/50 border-blue-500/20">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-blue-200">Tools Usage (Live)</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {toolsUsage.length > 0 ? (
-            <div className="h-48" data-testid="chart-tools-usage">
-              <Doughnut data={toolsData} options={chartOptions} />
-            </div>
-          ) : (
-            <div className="h-48 flex items-center justify-center text-slate-500 text-sm">
-              No tools logged yet - add tools when creating tasks
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="bg-slate-800/50 border-blue-500/20">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-blue-200">Task-wise Hours</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {taskHours.length > 0 ? (
-            <div className="h-48" data-testid="chart-task-hours">
-              <Bar data={taskHoursData} options={barOptions} />
-            </div>
-          ) : (
-            <div className="h-48 flex items-center justify-center text-slate-500 text-sm">
-              No task data available
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="bg-slate-800/50 border-blue-500/20">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-blue-200">Hourly Productivity (Live)</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {hourlyProductivity.length > 0 && hourlyProductivity.some(h => h.minutes > 0) ? (
-            <div className="h-48" data-testid="chart-hourly-productivity">
-              <Line data={productivityData} options={lineOptions} />
-            </div>
-          ) : (
-            <div className="h-48 flex items-center justify-center text-slate-500 text-sm">
-              No hourly data - tracks based on task times
-            </div>
-          )}
-        </CardContent>
-      </Card>
+    <div className="tracker-analytics-outer-container">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card className="bg-slate-800/50 border-blue-500/20 tracker-analytics-card card-work-distribution">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-blue-200">Work Distribution</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {totalMinutes > 0 ? (
+              <div className="h-48" data-testid="chart-work-distribution">
+                <Doughnut data={workDistributionData} options={chartOptions} />
+              </div>
+            ) : (
+              <div className="h-48 flex items-center justify-center text-slate-500 text-sm">
+                No tracked time data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+  
+        <Card className="bg-slate-800/50 border-blue-500/20 tracker-analytics-card card-tools-usage">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-blue-200">Tools Usage (Live)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {toolsUsage.length > 0 ? (
+              <div className="h-48" data-testid="chart-tools-usage">
+                <Doughnut data={toolsData} options={chartOptions} />
+              </div>
+            ) : (
+              <div className="h-48 flex items-center justify-center text-slate-500 text-sm">
+                No tools logged yet - add tools when creating tasks
+              </div>
+            )}
+          </CardContent>
+        </Card>
+  
+        <Card className="bg-slate-800/50 border-blue-500/20 tracker-analytics-card card-task-hours">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-blue-200">Task-wise Hours</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {taskHours.length > 0 ? (
+              <div className="h-48" data-testid="chart-task-hours">
+                <Bar data={taskHoursData} options={barOptions} />
+              </div>
+            ) : (
+              <div className="h-48 flex items-center justify-center text-slate-500 text-sm">
+                No task data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+  
+        <Card className="bg-slate-800/50 border-blue-500/20 tracker-analytics-card card-hourly-productivity">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-blue-200">Hourly Productivity (Live)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {hourlyProductivity.length > 0 && hourlyProductivity.some(h => h.minutes > 0) ? (
+              <div className="h-48" data-testid="chart-hourly-productivity">
+                <Line data={productivityData} options={lineOptions} />
+              </div>
+            ) : (
+              <div className="h-48 flex items-center justify-center text-slate-500 text-sm">
+                No hourly data - tracks based on task times
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

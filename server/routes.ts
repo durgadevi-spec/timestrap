@@ -1,12 +1,14 @@
-import type { Express } from "express";
+import express, { type Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket, WebSocket as WSWebSocket } from "ws";
 import { storage } from "./storage";
 import { promises as fs } from "fs";
+import fsSync from "fs";
 import path from "path";   // ✅ KEEP THIS
 import { pool } from "./db";
 import { pmsPool, saveSiteReportToPMS, getTasks, type PMSTask } from "./pmsSupabase";
 import { getLMSHours } from "./lmsSupabase";
+import { registerVoiceRoutes } from "./voice";
 import { format, parseISO, eachDayOfInterval, isSameDay } from "date-fns";
 import { sendEmail } from "./email";
 import bcrypt from "bcryptjs";
@@ -150,6 +152,13 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  registerVoiceRoutes(app);
+
+  // Reports static folder
+  const reportsDir = path.join(process.cwd(), "reports");
+  if (!fsSync.existsSync(reportsDir)) fsSync.mkdirSync(reportsDir, { recursive: true });
+  app.use("/reports", express.static(reportsDir));
+
   // Initialize WebSocket server for real-time updates
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
@@ -161,6 +170,31 @@ export async function registerRoutes(
   // Seed managers and default employees on startup
   await storage.seedManagers();
   await storage.seedDefaultEmployees();
+
+  // Create Phase 5 tables if they don't exist
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_memories (
+      id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid(),
+      employee_id VARCHAR(255) NOT NULL,
+      memory_type VARCHAR(255) NOT NULL,
+      memory_key VARCHAR(255) NOT NULL,
+      memory_value JSONB NOT NULL,
+      usage_count INTEGER DEFAULT 1 NOT NULL,
+      last_used_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      CONSTRAINT ai_memories_employee_type_key_unique UNIQUE (employee_id, memory_type, memory_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid(),
+      employee_id VARCHAR(255) NOT NULL,
+      title TEXT NOT NULL,
+      messages JSONB NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `).catch(err => console.error("Error creating Phase 5 tables on startup:", err));
 
   // Register Google Calendar OAuth and sync routes
   registerGoogleCalendarRoutes(app);
@@ -189,11 +223,64 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/auth/request-otp", async (req, res) => {
+    try {
+      const { employeeCode } = req.body;
+
+      if (!employeeCode) {
+        return res.status(400).json({ error: "Employee code is required" });
+      }
+
+      const employee = await storage.getEmployeeByCode(employeeCode);
+      if (!employee) {
+        // Don't reveal whether code exists — generic message
+        return res.json({ message: "If this employee code exists, an OTP has been sent." });
+      }
+
+      if (!employee.email) {
+        return res.status(400).json({ error: "No email address registered for this employee code. Contact your administrator." });
+      }
+
+      // Delete any existing unused OTPs for this employee
+      await storage.deleteExistingOTPs(employeeCode);
+
+      // Generate 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Store OTP
+      await storage.createOTP(employeeCode, otp, expiresAt);
+
+      // Send OTP email via Resend
+      await sendEmail({
+        to: [employee.email],
+        subject: "Timestrap Password Reset OTP",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+            <h2 style="color: #2563EB;">Password Reset Request</h2>
+            <p>Hi ${employee.name},</p>
+            <p>Your one-time password (OTP) for resetting your Timestrap password is:</p>
+            <div style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #2563EB; text-align: center; padding: 20px; background: #f0f4ff; border-radius: 8px; margin: 20px 0;">
+              ${otp}
+            </div>
+            <p>This OTP expires in <strong>10 minutes</strong> and can only be used once.</p>
+            <p>If you did not request this, please ignore this email — your password has not been changed.</p>
+          </div>
+        `
+      });
+
+      res.json({ message: "If this employee code exists, an OTP has been sent." });
+    } catch (error) {
+      console.error("Request OTP error:", error);
+      res.status(500).json({ error: "Failed to request OTP" });
+    }
+  });
+
   app.post("/api/auth/reset-password", async (req, res) => {
     try {
-      const { employeeCode, newPassword, confirmPassword } = req.body;
+      const { employeeCode, otp, newPassword, confirmPassword } = req.body;
 
-      if (!employeeCode || !newPassword || !confirmPassword) {
+      if (!employeeCode || !otp || !newPassword || !confirmPassword) {
         return res.status(400).json({ error: "All fields are required" });
       }
 
@@ -205,53 +292,41 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Password must be at least 6 characters" });
       }
 
-      const employee = await storage.getEmployeeByCode(employeeCode);
-      if (!employee) {
-        return res.status(404).json({ error: "Employee code not found" });
+      // Verify OTP
+      const otpRecord = await storage.getValidOTP(employeeCode, otp);
+      if (!otpRecord) {
+        return res.status(400).json({ error: "Invalid or expired OTP. Please request a new one." });
       }
 
+      // Mark OTP as used
+      await storage.markOTPUsed(otpRecord.id);
+
+      // Reset password
+      const employee = await storage.getEmployeeByCode(employeeCode);
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       await storage.updateEmployeePassword(employeeCode, hashedPassword);
 
-      // Send email if employee has an email address
-      if (employee.email) {
+      // Send confirmation email
+      if (employee?.email) {
         try {
-          const emailSubject = "Time Strap - Password Updated Successfully";
-          const emailHtml = `
-            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 0; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-              <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 30px 20px; text-align: center;">
-                <h1 style="color: #3b82f6; margin: 0; font-size: 26px; letter-spacing: -0.5px; font-weight: 700;">Time Strap</h1>
-                <p style="color: #94a3b8; margin: 6px 0 0 0; font-size: 14px; font-weight: 500;">Password Updated Successfully</p>
-              </div>
-              <div style="padding: 30px 24px; color: #334155; line-height: 1.6;">
-                <h2 style="color: #0f172a; margin-top: 0; font-size: 18px; font-weight: 600;">Hello ${employee.name},</h2>
-                <p style="font-size: 15px; margin-bottom: 20px;">Your password for your Time Strap account associated with Employee Code <strong style="color: #0f172a;">${employee.employeeCode}</strong> has been successfully updated.</p>
-                <div style="background-color: #f8fafc; padding: 18px; border-radius: 10px; border-left: 4px solid #3b82f6; font-size: 14px; color: #475569; margin: 24px 0;">
-                  <strong>Action Confirmed:</strong> If you performed this update, no further action is required. You can now log in using your newly chosen password.
-                </div>
-                <p style="color: #ef4444; font-size: 13px; font-weight: 600; margin-top: 24px; padding: 12px; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;">
-                  ⚠️ <strong>Security Notice:</strong> If you did not initiate this password change, please contact the IT Administrator immediately to secure your account and reset your credentials.
-                </p>
-              </div>
-              <div style="background-color: #f1f5f9; padding: 18px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0;">
-                <p style="margin: 0;">Automated email from Time Strap System</p>
-              </div>
-            </div>
-          `;
-
           await sendEmail({
             to: [employee.email],
-            subject: emailSubject,
-            html: emailHtml
+            subject: "Timestrap Password Changed Successfully",
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+                <h2 style="color: #16a34a;">Password Changed Successfully</h2>
+                <p>Hi ${employee.name},</p>
+                <p>Your Timestrap password was successfully reset at ${new Date().toLocaleString()}.</p>
+                <p>If you did not make this change, contact your administrator immediately.</p>
+              </div>
+            `
           });
         } catch (emailError) {
-          console.error("Failed to send password update email:", emailError);
+          console.error("Failed to send password confirmation email:", emailError);
         }
-      } else {
-        console.warn(`Employee ${employeeCode} has no registered email. Skipping email notification.`);
       }
 
-      res.json({ success: true, message: "Password updated successfully" });
+      res.json({ success: true, message: "Password reset successfully" });
     } catch (error) {
       console.error("Reset password error:", error);
       res.status(500).json({ error: "Failed to reset password" });
@@ -1095,6 +1170,12 @@ export async function registerRoutes(
         totalHours: totalHoursFormatted
       });
 
+      // Transition draft time entries to pending upon timesheet submission
+      await pool.query(
+        "UPDATE time_entries SET status = 'pending' WHERE employee_id = $1 AND date = $2 AND status = 'draft'",
+        [employeeId, date]
+      );
+
       // use the raw entries as tasks so the email helper has full data
       const tasks = dailyEntries;
       const { sendTimesheetSummaryEmail, sendTimesheetConfirmationEmail } = await import('./email');
@@ -1113,7 +1194,7 @@ export async function registerRoutes(
       // 2. Send confirmation to employee (New)
       if (employee.email) {
         try {
-          await sendTimesheetConfirmationEmail({
+          const confirmResult = await sendTimesheetConfirmationEmail({
             employeeName: employee.name,
             employeeCode: employee.employeeCode,
             employeeEmail: employee.email,
@@ -1126,9 +1207,13 @@ export async function registerRoutes(
               status: t.status || 'pending'
             }))
           });
-          console.log(`[CONFIRMATION EMAIL] Sent to ${employee.email}`);
+          if (confirmResult?.success) {
+            console.log(`[CONFIRMATION EMAIL] Sent to ${employee.email}`);
+          } else {
+            console.error('[CONFIRMATION EMAIL] Failed:', confirmResult?.error || 'Unknown error');
+          }
         } catch (confirmErr) {
-          console.error('[CONFIRMATION EMAIL] Failed:', confirmErr);
+          console.error('[CONFIRMATION EMAIL] Failed with exception:', confirmErr);
         }
       }
 
@@ -1145,7 +1230,7 @@ export async function registerRoutes(
         message: `Daily summary email sent for ${date} with ${dailyEntries.length} tasks`,
         taskCount: dailyEntries.length,
         totalHours: totalHoursFormatted,
-        emailId: emailResult.result?.id,
+        emailId: (emailResult as any).result?.id,
       });
     } catch (error) {
       console.error("Submit daily summary error:", error);
@@ -1185,7 +1270,7 @@ export async function registerRoutes(
         const approver = await storage.getEmployee(approvedBy);
         try {
           const { sendApprovalSummaryEmail } = await import('./email');
-          await sendApprovalSummaryEmail({
+          const emailResult = await sendApprovalSummaryEmail({
             employeeId: entry.employeeId,
             employeeName: entry.employeeName,
             employeeCode: entry.employeeCode,
@@ -1195,8 +1280,13 @@ export async function registerRoutes(
             recipients: employee?.email ? [employee.email] : undefined,
             approverName: approver?.name,
           });
+          if (emailResult?.success) {
+            console.log('[EMAIL] Grouped HR approval email sent successfully');
+          } else {
+            console.error('[EMAIL] Failed to send grouped HR approval email:', emailResult?.error || 'Unknown error');
+          }
         } catch (emailError) {
-          console.error('[EMAIL] Failed to send grouped HR approval email:', emailError);
+          console.error('[EMAIL] Failed to send grouped HR approval email with exception:', emailError);
         }
       }
 
@@ -1229,7 +1319,7 @@ export async function registerRoutes(
           // build recipient list: default + employee
           const defaultRecipients = (process.env.SENDER_EMAIL || "").split(",").map(e => e.trim()).filter(Boolean);
           const recipients = employee?.email ? [...defaultRecipients, employee.email] : defaultRecipients;
-          await sendApprovalSummaryEmail({
+          const emailResult = await sendApprovalSummaryEmail({
             employeeId: entry.employeeId,
             employeeName: entry.employeeName,
             employeeCode: entry.employeeCode,
@@ -1239,8 +1329,13 @@ export async function registerRoutes(
             recipients,
             approverName: approver?.name,
           });
+          if (emailResult?.success) {
+            console.log('[EMAIL] Grouped final approval email sent successfully');
+          } else {
+            console.error('[EMAIL] Failed to send grouped final approval email:', emailResult?.error || 'Unknown error');
+          }
         } catch (emailError) {
-          console.error('[EMAIL] Failed to send grouped final approval email:', emailError);
+          console.error('[EMAIL] Failed to send grouped final approval email with exception:', emailError);
         }
       }
 
@@ -1438,7 +1533,7 @@ export async function registerRoutes(
 
       try {
         const { sendApprovalSummaryEmail } = await import('./email');
-        await sendApprovalSummaryEmail({
+        const emailResult = await sendApprovalSummaryEmail({
           employeeId: entry.employeeId,
           employeeName: entry.employeeName,
           employeeCode: entry.employeeCode,
@@ -1449,8 +1544,13 @@ export async function registerRoutes(
           approverName: approver?.name,
           rejectionReason: reason,
         });
+        if (emailResult?.success) {
+          console.log('[EMAIL] Grouped rejection email sent successfully');
+        } else {
+          console.error('[EMAIL] Failed to send grouped rejection email:', emailResult?.error || 'Unknown error');
+        }
       } catch (emailError) {
-        console.error('[EMAIL] Failed to send grouped rejection email:', emailError);
+        console.error('[EMAIL] Failed to send grouped rejection email with exception:', emailError);
       }
 
       broadcast("time_entry_updated", entry);
@@ -2250,12 +2350,15 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
         });
 
         if (employee) {
-          const tStart = t.scheduleData?.startTime || t.startTime || "09:00";
-          const tEnd = t.scheduleData?.endTime || t.endTime || "10:00";
-          const [sh, sm] = tStart.split(':').map(Number);
-          const [eh, em] = tEnd.split(':').map(Number);
-          const diffMin = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
-          const totalHours = `${String(Math.floor(diffMin / 60)).padStart(2, '0')}:${String(diffMin % 60).padStart(2, '0')}`;
+          const tStart = t.scheduleData?.startTime || t.startTime || null;
+          const tEnd = t.scheduleData?.endTime || t.endTime || null;
+          let totalHours = '00:00';
+          if (tStart && tEnd) {
+            const [sh, sm] = tStart.split(':').map(Number);
+            const [eh, em] = tEnd.split(':').map(Number);
+            const diffMin = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+            totalHours = `${String(Math.floor(diffMin / 60)).padStart(2, '0')}:${String(diffMin % 60).padStart(2, '0')}`;
+          }
 
           const isBreak = t.isBreak || t.task_name?.toLowerCase().includes("break") || t.task_name?.toLowerCase().includes("lunch");
           
@@ -2563,15 +2666,20 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
         try {
           const { sendDeviationNotificationEmail } = await import('./email');
           const employee = await storage.getEmployee(employeeId);
-          await sendDeviationNotificationEmail({
+          const emailResult = await sendDeviationNotificationEmail({
              employeeName: employee?.name || 'Employee',
              employeeCode: employee?.employeeCode || employeeId,
              taskName,
              projectName,
              reason
           });
+          if (emailResult?.success) {
+            console.log('[EMAIL] Deviation notification email sent successfully');
+          } else {
+            console.error('[EMAIL] Failed to send deviation notification email:', emailResult?.error || 'Unknown error');
+          }
         } catch (e) {
-          console.error('[EMAIL] Deviation notification failed:', e);
+          console.error('[EMAIL] Deviation notification failed with exception:', e);
         }
 
         broadcast("daily_plan_deviation", { task, employeeId });
@@ -2707,17 +2815,25 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
 
       let effectiveRole = employee.role;
       let effectiveEmpCode = employee.employeeCode;
+      // When admin/manager picks "My Tasks" we should ONLY return tasks assigned
+      // to that user (i.e. tasks where they are a task member). The default
+      // `getDepartmentTasks` query also includes unassigned tasks
+      // (`tm.task_id IS NULL`); to honor "My Tasks" we pass a flag so the helper
+      // can drop those unassigned rows for this view.
+      let myTasksOnly = false;
       
       // Override for Admin/Manager to get specific views
       if ((employee.role === 'admin' || employee.role === 'manager' || employee.employeeCode === 'E0000' || employee.employeeCode === 'E0001') && viewType) {
          if (viewType === 'my-tasks') {
             effectiveRole = 'employee';
             // effectiveEmpCode remains employee.employeeCode
+            myTasksOnly = true;
          } else if (viewType === 'department') {
             effectiveRole = 'employee';
             effectiveEmpCode = null as any; 
          }
       }
+
 
       // Get projects for this employee's department
       const { getProjects } = await import('./pmsSupabase');
@@ -2746,7 +2862,8 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
 
       // Fetch all tasks for the department in a single query
       const { getDepartmentTasks } = await import('./pmsSupabase');
-      const allProjectTasks = await getDepartmentTasks(userDepartment, effectiveEmpCode, effectiveRole);
+      const allProjectTasks = await getDepartmentTasks(userDepartment, effectiveEmpCode, effectiveRole, myTasksOnly);
+
       
       console.log(`[AVAILABLE-TASKS] Found ${allProjectTasks.length} tasks across all projects`);
 
@@ -3102,28 +3219,113 @@ function shouldSyncPMSTask(task: PMSTask, targetDateStr: string): boolean {
         }
       }
 
-      const { runRAGChat } = await import("./rag/ragChat");
+      const { runCoordinator } = await import("./rag/coordinator");
       const u = (req as any).user || {};
-      await runRAGChat(
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      await runCoordinator({
         message,
-        history || [],
-        {
+        userContext: {
           employeeId: u.employeeId || employeeId,
           employeeCode: u.employeeCode || employeeCode,
           role: u.role || role,
           department: u.department || department,
           lmsUserId: req.body.lmsUserId || u.employeeCode || employeeCode,
           employeeName: u.name || u.employeeName || req.body.employeeName || employeeName || "",
+          baseUrl,
         },
-        (chunk) => {
+        history: history || [],
+        onChunk: (chunk) => {
           res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-        }
-      );
+        },
+      });
     } catch (err: any) {
       console.error("RAG chat error:", err);
       res.write(`data: ${JSON.stringify({ type: "text", content: `\n⚠️ Error processing chat: ${err.message}` })}\n\n`);
     } finally {
       res.end();
+    }
+  });
+
+  // ── Route 1: Save or update a chat session ──────────────────
+  app.post("/api/chat-sessions", async (req, res) => {
+    try {
+      const { employeeId, sessionId, title, messages } = req.body;
+      if (!employeeId) return res.status(400).json({ error: "employeeId required" });
+
+      if (sessionId) {
+        // Update existing session
+        const updateTitle = title || (messages?.[0]?.content?.slice(0, 60) + "...") || "Chat";
+        await pool.query(
+          `UPDATE chat_sessions 
+           SET messages = $1, title = COALESCE(NULLIF($2,''), title), updated_at = NOW()
+           WHERE id = $3 AND employee_id = $4`,
+          [JSON.stringify(messages || []), updateTitle, sessionId, employeeId]
+        );
+        return res.json({ success: true, sessionId });
+      } else {
+        // Create new session
+        const autoTitle = messages?.[0]?.content?.slice(0, 60) || "New Chat";
+        const result = await pool.query(
+          `INSERT INTO chat_sessions (employee_id, title, messages)
+           VALUES ($1, $2, $3) RETURNING id`,
+          [employeeId, autoTitle, JSON.stringify(messages || [])]
+        );
+        return res.json({ success: true, sessionId: result.rows[0].id });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Route 2: Get all chat sessions for an employee ──────────
+  app.get("/api/chat-sessions/:employeeId", async (req, res) => {
+    try {
+      const { employeeId } = req.params;
+      const result = await pool.query(
+        `SELECT id, title, created_at, updated_at,
+                LEFT(messages::text, 200) as preview
+         FROM chat_sessions
+         WHERE employee_id = $1
+         ORDER BY updated_at DESC
+         LIMIT 50`,
+        [employeeId]
+      );
+      res.json({ sessions: result.rows });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Route 3: Get a single chat session with full messages ────
+  app.get("/api/chat-sessions/:employeeId/:sessionId", async (req, res) => {
+    try {
+      const { employeeId, sessionId } = req.params;
+      const result = await pool.query(
+        `SELECT id, title, messages, created_at, updated_at
+         FROM chat_sessions
+         WHERE id = $1 AND employee_id = $2`,
+        [sessionId, employeeId]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      res.json(result.rows[0]);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Route 4: Delete a chat session ──────────────────────────
+  app.delete("/api/chat-sessions/:employeeId/:sessionId", async (req, res) => {
+    try {
+      const { employeeId, sessionId } = req.params;
+      await pool.query(
+        `DELETE FROM chat_sessions WHERE id = $1 AND employee_id = $2`,
+        [sessionId, employeeId]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

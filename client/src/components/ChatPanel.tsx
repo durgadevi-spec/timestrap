@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { MessageSquare, Send, X, Sparkles, Check, ListTodo, Sun, Moon } from 'lucide-react';
+import { MessageSquare, Send, X, Sparkles, Check, ListTodo, Sun, Moon, Mic } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import ReactMarkdown from 'react-markdown';
+import VoiceBlob from './VoiceBlob';
 
 interface ProjectTaskSelection {
   id: string;
@@ -18,6 +19,7 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   projects?: ProjectTaskSelection[];
+  tasks?: any[];
   planSubmitted?: boolean;
 }
 
@@ -127,6 +129,8 @@ const IntroScreen = ({ onDone, isDark }: { onDone: () => void; isDark: boolean }
 // ── Main ChatPanel ───────────────────────────────────────────────────────────
 export default function ChatPanel() {
   const { user } = useAuth();
+  const employeeId = user?.id;
+
   const [isOpen, setIsOpen] = useState(false);
   const [showIntro, setShowIntro] = useState(false);
   const [chatReady, setChatReady] = useState(false);
@@ -135,7 +139,178 @@ export default function ChatPanel() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedTasks, setSelectedTasks] = useState<Record<string, boolean>>({});
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [taskTimes, setTaskTimes] = useState<Record<string, { start: string; end: string }>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [savingSession, setSavingSession] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+
+  // Voice state — single variable controls everything
+  const [blobMode, setBlobMode] = useState<'listening' | 'speaking' | null>(null);
+  const mediaRecorder = useRef<MediaRecorder | null>(null);
+  const audioChunks = useRef<Blob[]>([]);
+  const currentAudio = useRef<HTMLAudioElement | null>(null);
+
+  // ── Speak (called only from voice flow + greeting) ───
+  const speakText = async (text: string) => {
+    try {
+      setBlobMode('speaking');
+      const response = await fetch('/api/aria/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      currentAudio.current = audio;
+      audio.onended = () => {
+        setBlobMode(null);
+        URL.revokeObjectURL(url);
+      };
+      audio.play();
+    } catch {
+      setBlobMode(null);
+    }
+  };
+
+  const stopSpeaking = () => {
+    if (currentAudio.current) {
+      currentAudio.current.pause();
+      currentAudio.current.currentTime = 0;
+      currentAudio.current = null;
+    }
+    setBlobMode(null);
+  };
+
+  const shouldTriggerGreeting = useRef(false);
+
+  // ── Greeting — once per day on first user interaction ──
+  useEffect(() => {
+    const today = new Date().toDateString();
+    if (localStorage.getItem('aria_greeted_today') === today) return;
+
+    const handleUserInteraction = () => {
+      shouldTriggerGreeting.current = true;
+      handleOpen();
+      window.removeEventListener('click', handleUserInteraction);
+    };
+
+    window.addEventListener('click', handleUserInteraction);
+    return () => {
+      window.removeEventListener('click', handleUserInteraction);
+    };
+  }, [user]);
+
+  // Trigger greeting when chat pane is fully ready after intro
+  useEffect(() => {
+    if (!chatReady || !shouldTriggerGreeting.current) return;
+    shouldTriggerGreeting.current = false;
+
+    const triggerGreeting = async () => {
+      try {
+        const today = new Date().toDateString();
+        const hour = new Date().getHours();
+        const timeOfDay = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+
+        const { text } = await fetch('/api/aria/greet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            employeeName: user?.name?.split(' ')[0] || '',
+            dueTaskCount: 0,
+            timeOfDay
+          })
+        }).then(r => r.json());
+
+        // text bubble first
+        setMessages((prev) => [
+          ...prev,
+          { id: Math.random().toString(), role: 'assistant', content: text }
+        ]);
+
+        // voice simultaneously — no await
+        speakText(text);
+
+        localStorage.setItem('aria_greeted_today', today);
+      } catch (err) {
+        console.error('Greeting error:', err);
+      }
+    };
+
+    triggerGreeting();
+  }, [chatReady]);
+
+  const toggleRecording = async () => {
+    stopSpeaking();
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
+
+  // ── Mic button clicked → start recording ─────────────
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 16000
+        }
+      });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/mp4';
+
+      mediaRecorder.current = new MediaRecorder(stream, { mimeType });
+      audioChunks.current = [];
+      mediaRecorder.current.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunks.current.push(e.data);
+      };
+      mediaRecorder.current.start();
+      setIsRecording(true);
+      setBlobMode('listening');
+    } catch {
+      console.error('Mic access denied');
+    }
+  };
+
+  // ── Tap blob or cancel → stop and process ────────────
+  const stopRecording = () => {
+    if (!mediaRecorder.current) return;
+    mediaRecorder.current.stop();
+    setIsRecording(false);
+    setBlobMode(null);
+
+    mediaRecorder.current.onstop = async () => {
+      try {
+        const audioBlob = new Blob(audioChunks.current, { type: 'audio/webm' });
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'audio.webm');
+
+        // transcribe
+        const { text: transcribed } = await fetch('/api/aria/transcribe', {
+          method: 'POST',
+          body: formData
+        }).then(r => r.json());
+
+        if (!transcribed?.trim()) return;
+
+        // Send directly to ARIA — no input box filling
+        sendMessage(transcribed, undefined, true);
+      } catch (err) {
+        console.error('Voice error:', err);
+        setBlobMode(null);
+      }
+    };
+  };
 
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -143,24 +318,117 @@ export default function ChatPanel() {
     }
   }, [messages]);
 
+  // Load all sessions for this employee
+  const loadSessions = async () => {
+    if (!employeeId) return;
+    try {
+      const res = await fetch(`/api/chat-sessions/${employeeId}`);
+      const data = await res.json();
+      setSessions(data.sessions || []);
+    } catch (err) {
+      console.error("Failed to load sessions:", err);
+    }
+  };
+
+  // Save current conversation to DB
+  const saveCurrentSession = async (msgs: any[]) => {
+    if (!employeeId || msgs.length === 0) return;
+    try {
+      setSavingSession(true);
+      const firstUserMsg = msgs.find((m) => m.role === "user")?.content || "New Chat";
+      const autoTitle = firstUserMsg.slice(0, 60);
+      const res = await fetch("/api/chat-sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employeeId,
+          sessionId: currentSessionId,
+          title: autoTitle,
+          messages: msgs,
+        }),
+      });
+      const data = await res.json();
+      if (data.sessionId && !currentSessionId) {
+        setCurrentSessionId(data.sessionId);
+      }
+      await loadSessions();
+      return data.sessionId || currentSessionId;
+    } catch (err) {
+      console.error("Failed to save session:", err);
+    } finally {
+      setSavingSession(false);
+    }
+  };
+
+  // Start a brand new chat
+  const startNewChat = async () => {
+    // Save current conversation first
+    if (messages.length > 0) {
+      await saveCurrentSession(messages);
+    }
+    // Reset to fresh state
+    setMessages([]);
+    setCurrentSessionId(null);
+    setShowSidebar(false);
+  };
+
+  // Open a past session
+  const openSession = async (sessionId: string) => {
+    try {
+      const res = await fetch(`/api/chat-sessions/${employeeId}/${sessionId}`);
+      const data = await res.json();
+      setMessages(data.messages || []);
+      setCurrentSessionId(sessionId);
+      setShowSidebar(false);
+    } catch (err) {
+      console.error("Failed to load session:", err);
+    }
+  };
+
+  // Delete a session
+  const deleteSession = async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await fetch(`/api/chat-sessions/${employeeId}/${sessionId}`, { method: "DELETE" });
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      if (currentSessionId === sessionId) {
+        setMessages([]);
+        setCurrentSessionId(null);
+      }
+    } catch (err) {
+      console.error("Failed to delete session:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && employeeId) {
+      loadSessions();
+    }
+  }, [isOpen, employeeId]);
+
+  const filteredSessions = sessions.filter((s) =>
+    s.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   if (!user) return null;
 
-  const handleOpen = () => {
+  function handleOpen() {
     setIsOpen(true);
     setShowIntro(true);
     setChatReady(false);
-  };
+  }
 
-  const handleClose = () => {
+  function handleClose() {
+    stopSpeaking();
     setIsOpen(false);
     setShowIntro(false);
     setChatReady(false);
-  };
+  }
 
-  const handleIntroEnd = () => {
+  function handleIntroEnd() {
     setShowIntro(false);
     setChatReady(true);
-  };
+  }
 
   // ── Theme tokens ─────────────────────────────────────────────────────────
   const t = isDark ? {
@@ -207,21 +475,24 @@ export default function ChatPanel() {
     scrollThumb: '#ddd6fe',
   };
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || loading) return;
-
-    const userMessage = input.trim();
-    setInput('');
-    setLoading(true);
+  const sendMessage = async (text: string, displayText?: string, speakOnDone = false) => {
+    stopSpeaking();
+    if (!text.trim()) return;
 
     const userMsgId = Math.random().toString();
     const assistantMsgId = Math.random().toString();
+    let assistantText = '';
 
-    setMessages((prev) => [...prev, { id: userMsgId, role: 'user', content: userMessage }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: userMsgId, role: 'user' as const, content: displayText || text },
+      { id: assistantMsgId, role: 'assistant' as const, content: '' }
+    ]);
+    setInput('');
+    setLoading(true);
 
     const chatHistory = messages.map((m) => ({
-      role: m.role === 'user' ? 'user' as const : 'assistant' as const,
+      role: m.role,
       content: m.content,
     }));
 
@@ -230,7 +501,7 @@ export default function ChatPanel() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: userMessage,
+          message: text,
           history: chatHistory,
           employeeId: user.id,
           employeeCode: user.employeeCode,
@@ -243,37 +514,93 @@ export default function ChatPanel() {
       if (!response.body) throw new Error('No response body');
 
       const reader = response.body.getReader();
+      let sseBuffer = '';
       const decoder = new TextDecoder();
-      let done = false;
-      let assistantText = '';
-      let interactiveProjects: ProjectTaskSelection[] = [];
+      let spoke = false;
 
-      setMessages((prev) => [...prev, { id: assistantMsgId, role: 'assistant', content: '' }]);
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
 
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        const chunkValue = decoder.decode(value);
-        const lines = chunkValue.split('\n\n');
+        sseBuffer += decoder.decode(value, { stream: true });
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.substring(6));
-              if (data.type === 'text') {
-                assistantText += data.content;
-                setMessages((prev) =>
-                  prev.map((m) => m.id === assistantMsgId ? { ...m, content: assistantText } : m)
-                );
-              } else if (data.type === 'interactive_daily_plan') {
-                interactiveProjects = data.projects;
-                setMessages((prev) =>
-                  prev.map((m) => m.id === assistantMsgId ? { ...m, projects: interactiveProjects } : m)
-                );
-              }
-            } catch (_) { }
+        // Split on double newline (SSE event separator)
+        const parts = sseBuffer.split('\n\n');
+        // Keep last incomplete part in buffer
+        sseBuffer = parts.pop() || '';
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith('data: ')) continue;
+
+          const jsonStr = line.substring(6).trim();
+          if (!jsonStr) continue;
+
+          let data: any;
+          try {
+            data = JSON.parse(jsonStr);
+          } catch (err) {
+            console.error('[SSE] JSON parse error:', err, 'Raw:', jsonStr.substring(0, 100));
+            continue;
+          }
+
+          console.log('[SSE] chunk received:', data.type);
+
+          if (data.type === 'full_text') {
+            if (speakOnDone && !spoke) {
+              spoke = true;
+              speakText(data.content);
+            }
+          } else if (data.type === 'text') {
+            assistantText += data.content || '';
+            setMessages(prev =>
+              prev.map(m => m.id === assistantMsgId ? { ...m, content: assistantText } : m)
+            );
+          } else if (data.type === 'interactive_task_plan') {
+            setMessages(prev =>
+              prev.map(m => m.id === assistantMsgId ? { ...m, tasks: data.tasks } : m)
+            );
+          } else if (data.type === 'action_executed') {
+            // handle action feedback if needed
           }
         }
+      }
+
+      // Process any remaining buffer content at stream end
+      if (sseBuffer.startsWith('data: ')) {
+        const jsonStr = sseBuffer.substring(6).trim();
+        if (jsonStr) {
+          try {
+            const data = JSON.parse(jsonStr);
+            if (data.type === 'full_text') {
+              if (speakOnDone && !spoke) {
+                spoke = true;
+                speakText(data.content);
+              }
+            } else if (data.type === 'text') {
+              assistantText += data.content || '';
+              setMessages(prev =>
+                prev.map(m => m.id === assistantMsgId ? { ...m, content: assistantText } : m)
+              );
+            } else if (data.type === 'interactive_task_plan') {
+              setMessages(prev =>
+                prev.map(m => m.id === assistantMsgId ? { ...m, tasks: data.tasks } : m)
+              );
+            }
+          } catch { }
+        }
+      }
+
+      // Auto-save session after successful stream completion
+      const finalMessages = [
+        ...messages,
+        { id: userMsgId, role: 'user' as const, content: displayText || text },
+        { id: assistantMsgId, role: 'assistant' as const, content: assistantText }
+      ];
+      await saveCurrentSession(finalMessages);
+
+      if (speakOnDone && assistantText && !spoke) {
+        speakText(assistantText);
       }
     } catch (error: any) {
       setMessages((prev) => [...prev, {
@@ -284,6 +611,12 @@ export default function ChatPanel() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSend = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!input.trim()) return;
+    sendMessage(input);
   };
 
   const handleToggleTask = (taskId: string) => {
@@ -370,8 +703,135 @@ export default function ChatPanel() {
               display: 'flex', flexDirection: 'column',
             }}
           >
+
+
             {/* Intro overlay */}
             {showIntro && <IntroScreen onDone={handleIntroEnd} isDark={isDark} />}
+
+            {/* Sidebar / Chat History overlay */}
+            {showSidebar && (
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                background: t.panel,
+                borderRadius: '16px',
+                zIndex: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                padding: '12px',
+                border: `1px solid ${t.botBorder}`,
+              }}>
+                {/* ── Header ────────────────────────────────────────── */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                  <button
+                    onClick={() => setShowSidebar(false)}
+                    style={{ background: 'none', border: 'none', color: t.subText, cursor: 'pointer', fontSize: '18px', padding: '4px' }}
+                  >
+                    ←
+                  </button>
+                  <span style={{ color: t.nameText, fontWeight: 600, fontSize: '14px' }}>Chat History</span>
+                  <button
+                    onClick={startNewChat}
+                    style={{
+                      marginLeft: 'auto',
+                      background: 'linear-gradient(135deg,#7c3aed,#4f46e5)',
+                      border: 'none',
+                      borderRadius: '8px',
+                      color: '#fff',
+                      padding: '6px 12px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    + New Chat
+                  </button>
+                </div>
+
+                {/* ── Search ────────────────────────────────────────── */}
+                <input
+                  type="text"
+                  placeholder="Search chats..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: `1px solid ${t.inputBorder}`,
+                    background: t.inputBg,
+                    color: t.inputText,
+                    fontSize: '12px',
+                    marginBottom: '10px',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+
+                {/* ── Session List ───────────────────────────────────── */}
+                <div className="aria-scroll" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {filteredSessions.length === 0 ? (
+                    <div style={{ color: t.subText, fontSize: '12px', textAlign: 'center', marginTop: '20px' }}>
+                      No chats found
+                    </div>
+                  ) : (
+                    filteredSessions.map((session) => (
+                      <div
+                        key={session.id}
+                        onClick={() => openSession(session.id)}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          background: currentSessionId === session.id ? 'rgba(124,58,237,0.15)' : t.suggestionBg,
+                          border: `1px solid ${currentSessionId === session.id ? '#7c3aed' : t.suggestionBorder}`,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            color: t.botText,
+                            fontSize: '12px',
+                            fontWeight: 500,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {session.title}
+                          </div>
+                          <div style={{ color: t.subText, fontSize: '10px', marginTop: '2px' }}>
+                            {new Date(session.updated_at).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <button
+                          onClick={(e) => deleteSession(session.id, e)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: t.subText,
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            padding: '2px 4px',
+                            flexShrink: 0,
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* ── Header ── */}
             <div style={{
@@ -382,6 +842,24 @@ export default function ChatPanel() {
               flexShrink: 0,
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {/* History / sidebar toggle button (left side) */}
+                <button
+                  onClick={() => setShowSidebar(true)}
+                  title="Chat History"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    padding: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  ☰
+                </button>
+
                 {/* ARIA avatar */}
                 <div style={{
                   width: '32px', height: '32px', borderRadius: '50%',
@@ -405,6 +883,25 @@ export default function ChatPanel() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {/* New chat button */}
+                <button
+                  onClick={startNewChat}
+                  title="New Chat"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    fontSize: '20px',
+                    padding: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    fontWeight: 300,
+                  }}
+                >
+                  +
+                </button>
+
                 {/* Dark/Light toggle */}
                 <button
                   onClick={() => setIsDark(!isDark)}
@@ -441,198 +938,395 @@ export default function ChatPanel() {
               </div>
             </div>
 
-            {/* ── Messages ── */}
-            <div
-              className="aria-scroll"
-              style={{
-                flex: 1, overflowY: 'auto', padding: '16px',
-                display: 'flex', flexDirection: 'column', gap: '12px',
-                background: t.msgArea,
-              }}
-            >
-              {/* Empty state */}
-              {chatReady && messages.length === 0 && (
-                <div className="aria-msg" style={{
-                  display: 'flex', flexDirection: 'column', alignItems: 'center',
-                  justifyContent: 'center', height: '100%', textAlign: 'center', padding: '0 16px',
-                }}>
-                  <div style={{ fontSize: '32px', marginBottom: '12px' }}>👋</div>
-                  <div style={{ fontSize: '14px', fontWeight: '600', color: t.nameText, marginBottom: '4px' }}>
-                    Hello, {user.name}!
+            {/* Wrap message area + blob together */}
+            <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {/* ── Messages ── */}
+              <div
+                className="aria-scroll"
+                style={{
+                  flex: 1, overflowY: 'auto', padding: '16px',
+                  display: 'flex', flexDirection: 'column', gap: '12px',
+                  background: t.msgArea,
+                }}
+              >
+                {/* Empty state */}
+                {chatReady && messages.length === 0 && (
+                  <div className="aria-msg" style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    justifyContent: 'center', height: '100%', textAlign: 'center', padding: '0 16px',
+                  }}>
+                    <div style={{ fontSize: '32px', marginBottom: '12px' }}>👋</div>
+                    <div style={{ fontSize: '14px', fontWeight: '600', color: t.nameText, marginBottom: '4px' }}>
+                      Hello, {user.name}!
+                    </div>
+                    <div style={{ fontSize: '12px', color: t.subText, marginBottom: '16px' }}>
+                      I'm ARIA. What can I help you with today?
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                      {[
+                        '📋 What are my assigned tasks?',
+                        '🕐 Show me my timesheet for today',
+                        '🌴 Do I have any pending leaves?',
+                        ...(['manager', 'admin', 'hr'].includes(user.role) ? ['👥 Show all pending leave requests'] : []),
+                      ].map((s) => (
+                        <button
+                          key={s}
+                          onClick={() => { setInput(s.slice(3).trim()); }}
+                          style={{
+                            background: t.suggestionBg,
+                            border: `1px solid ${t.suggestionBorder}`,
+                            borderRadius: '10px', padding: '8px 12px',
+                            fontSize: '12px', color: t.botText,
+                            textAlign: 'left', cursor: 'pointer',
+                            transition: 'opacity .15s',
+                          }}
+                          className="aria-btn"
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '12px', color: t.subText, marginBottom: '16px' }}>
-                    I'm ARIA. What can I help you with today?
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
-                    {[
-                      '📋 What are my assigned tasks?',
-                      '🕐 Show me my timesheet for today',
-                      '🌴 Do I have any pending leaves?',
-                      ...(['manager', 'admin', 'hr'].includes(user.role) ? ['👥 Show all pending leave requests'] : []),
-                    ].map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => { setInput(s.slice(3).trim()); }}
-                        style={{
-                          background: t.suggestionBg,
-                          border: `1px solid ${t.suggestionBorder}`,
-                          borderRadius: '10px', padding: '8px 12px',
-                          fontSize: '12px', color: t.botText,
-                          textAlign: 'left', cursor: 'pointer',
-                          transition: 'opacity .15s',
-                        }}
-                        className="aria-btn"
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+                )}
 
-              {/* Messages */}
-              {messages.map((m) => (
-                <div
-                  key={m.id}
-                  className="aria-msg"
-                  style={{
-                    display: 'flex', flexDirection: 'column',
-                    alignItems: m.role === 'user' ? 'flex-end' : 'flex-start',
-                  }}
-                >
-                  {/* Bot avatar row */}
-                  {m.role === 'assistant' && (
-                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', maxWidth: '85%' }}>
+                {/* Messages */}
+                {messages.map((m) => (
+                  <div
+                    key={m.id}
+                    className="aria-msg"
+                    style={{
+                      display: 'flex', flexDirection: 'column',
+                      alignItems: m.role === 'user' ? 'flex-end' : 'flex-start',
+                    }}
+                  >
+                    {/* Bot avatar row */}
+                    {m.role === 'assistant' && (
+                      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', maxWidth: '85%' }}>
+                        <div style={{
+                          width: '24px', height: '24px', borderRadius: '50%',
+                          background: 'linear-gradient(135deg,#7c3aed,#4f46e5)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '12px', flexShrink: 0,
+                        }}>🤖</div>
+                        <div style={{
+                          background: t.botBubble,
+                          border: `1px solid ${t.botBorder}`,
+                          color: t.botText,
+                          borderRadius: '16px 16px 16px 4px',
+                          padding: '8px 12px', fontSize: '13px',
+                          lineHeight: '1.5', whiteSpace: 'pre-wrap',
+                          minHeight: m.content === '' ? '40px' : 'auto',
+                          display: 'flex', alignItems: 'center',
+                        }}>
+                          {m.content === '' && loading ? (
+                            <><span className="aria-dot" /><span className="aria-dot" /><span className="aria-dot" /></>
+                          ) : (
+                            <div style={{ width: '100%' }}>
+                              <ReactMarkdown
+                                components={{
+                                  p: ({ node, ...props }) => <p style={{ margin: 0, padding: 0 }} {...props} />,
+                                  ul: ({ node, ...props }) => <ul style={{ margin: '4px 0', paddingLeft: '20px', listStyleType: 'disc' }} {...props} />,
+                                  ol: ({ node, ...props }) => <ol style={{ margin: '4px 0', paddingLeft: '20px', listStyleType: 'decimal' }} {...props} />,
+                                  li: ({ node, ...props }) => <li style={{ margin: '2px 0' }} {...props} />,
+                                }}
+                              >
+                                {m.content}
+                              </ReactMarkdown>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* User bubble */}
+                    {m.role === 'user' && (
                       <div style={{
-                        width: '24px', height: '24px', borderRadius: '50%',
-                        background: 'linear-gradient(135deg,#7c3aed,#4f46e5)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '12px', flexShrink: 0,
-                      }}>🤖</div>
-                      <div style={{
-                        background: t.botBubble,
-                        border: `1px solid ${t.botBorder}`,
-                        color: t.botText,
-                        borderRadius: '16px 16px 16px 4px',
+                        background: t.userBubble,
+                        color: t.userText,
+                        borderRadius: '16px 16px 4px 16px',
                         padding: '8px 12px', fontSize: '13px',
                         lineHeight: '1.5', whiteSpace: 'pre-wrap',
-                        minHeight: m.content === '' ? '40px' : 'auto',
-                        display: 'flex', alignItems: 'center',
+                        maxWidth: '85%',
                       }}>
-                        {m.content === '' && loading ? (
-                          <><span className="aria-dot" /><span className="aria-dot" /><span className="aria-dot" /></>
-                        ) : (
-                          <div style={{ width: '100%' }}>
-                            <ReactMarkdown
-                              components={{
-                                p: ({ node, ...props }) => <p style={{ margin: 0, padding: 0 }} {...props} />,
-                                ul: ({ node, ...props }) => <ul style={{ margin: '4px 0', paddingLeft: '20px', listStyleType: 'disc' }} {...props} />,
-                                ol: ({ node, ...props }) => <ol style={{ margin: '4px 0', paddingLeft: '20px', listStyleType: 'decimal' }} {...props} />,
-                                li: ({ node, ...props }) => <li style={{ margin: '2px 0' }} {...props} />,
-                              }}
-                            >
-                              {m.content}
-                            </ReactMarkdown>
-                          </div>
-                        )}
+                        {m.content}
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* User bubble */}
-                  {m.role === 'user' && (
-                    <div style={{
-                      background: t.userBubble,
-                      color: t.userText,
-                      borderRadius: '16px 16px 4px 16px',
-                      padding: '8px 12px', fontSize: '13px',
-                      lineHeight: '1.5', whiteSpace: 'pre-wrap',
-                      maxWidth: '85%',
-                    }}>
-                      {m.content}
-                    </div>
-                  )}
+                    {m.role === 'assistant' && m.tasks && m.tasks.length > 0 && !m.planSubmitted && (
+                      <div style={{
+                        marginTop: '10px',
+                        border: '0.5px solid #534AB7',
+                        borderRadius: '12px',
+                        overflow: 'hidden',
+                        width: '100%',
+                      }}>
+                        <div style={{
+                          padding: '10px 12px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          color: '#a78bfa',
+                          borderBottom: '0.5px solid #3a2d6e',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}>
+                          ☑ Select tasks for today's plan
+                        </div>
 
-                  {/* Daily plan selector */}
-                  {m.projects && m.projects.length > 0 && !m.planSubmitted && (
-                    <div style={{
-                      marginTop: '8px', width: '100%',
-                      background: t.botBubble,
-                      border: `1px solid ${t.botBorder}`,
-                      borderRadius: '12px', padding: '12px',
-                    }}>
-                      <div style={{ fontSize: '11px', fontWeight: '600', color: '#a78bfa', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <ListTodo style={{ width: '14px', height: '14px' }} />
-                        Select projects for your daily plan:
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
-                        {m.projects.map((proj) => (
-                          <div
-                            key={proj.id}
-                            onClick={() => handleToggleTask(proj.id)}
+                        <div style={{
+                          maxHeight: '300px',
+                          overflowY: 'auto',
+                          padding: '8px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                        }}>
+                          {m.tasks.map((task: any) => {
+                            const isSelected = selectedTaskIds.includes(task.id);
+                            const times = taskTimes[task.id] || { start: '09:00', end: '10:00' };
+                            const isHigh = task.priority && task.priority.toLowerCase() === 'high';
+                            const priorityText = task.priority ? (task.priority.charAt(0).toUpperCase() + task.priority.slice(1).toLowerCase()) : 'Medium';
+
+                            return (
+                              <div
+                                key={task.id}
+                                style={{
+                                  borderRadius: '8px',
+                                  padding: '9px 10px',
+                                  border: `0.5px solid ${isSelected ? '#7c3aed' : '#2d2d3a'}`,
+                                  background: isSelected ? '#1a1233' : 'transparent',
+                                  transition: 'all 0.15s',
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => {
+                                      setSelectedTaskIds(prev =>
+                                        isSelected ? prev.filter(id => id !== task.id) : [...prev, task.id]
+                                      );
+                                      if (!isSelected) {
+                                        // Auto-set start time from previous task end time
+                                        const allSelected = [...selectedTaskIds];
+                                        const lastId = allSelected[allSelected.length - 1];
+                                        const lastEnd = lastId ? (taskTimes[lastId]?.end || '09:00') : '09:00';
+                                        const [h, min] = lastEnd.split(':').map(Number);
+                                        const newEnd = `${String((h + 1) % 24).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+                                        setTaskTimes(prev => ({
+                                          ...prev,
+                                          [task.id]: { start: lastEnd, end: newEnd },
+                                        }));
+                                      }
+                                    }}
+                                    style={{ width: '15px', height: '15px', accentColor: '#7c3aed', cursor: 'pointer' }}
+                                  />
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: '12px', fontWeight: 500, color: '#fff', wordBreak: 'break-word' }}>
+                                      {task.task_name}
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#888' }}>{task.project_name}</div>
+                                  </div>
+                                  <span style={{
+                                    fontSize: '10px',
+                                    padding: '2px 7px',
+                                    borderRadius: '4px',
+                                    background: isHigh ? '#450a0a' : '#172554',
+                                    color: isHigh ? '#fca5a5' : '#93c5fd',
+                                    flexShrink: 0,
+                                  }}>
+                                    {task.priority ? (task.priority.charAt(0).toUpperCase() + task.priority.slice(1).toLowerCase()) : 'Medium'}
+                                  </span>
+                                  <span style={{ fontSize: '10px', color: '#555', flexShrink: 0 }}>{task.end_date}</span>
+                                </div>
+
+                                {isSelected && (
+                                  <div style={{ marginTop: '8px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: '11px', color: '#888' }}>Start</span>
+                                    <input
+                                      type="time"
+                                      value={times.start}
+                                      onChange={e => setTaskTimes(prev => ({
+                                        ...prev,
+                                        [task.id]: { ...times, start: e.target.value },
+                                      }))}
+                                      style={{ padding: '3px 6px', borderRadius: '4px', border: '0.5px solid #444', background: '#0f0f1a', color: '#fff', fontSize: '12px' }}
+                                    />
+                                    <span style={{ fontSize: '11px', color: '#888' }}>End</span>
+                                    <input
+                                      type="time"
+                                      value={times.end}
+                                      onChange={e => setTaskTimes(prev => ({
+                                        ...prev,
+                                        [task.id]: { ...times, end: e.target.value },
+                                      }))}
+                                      style={{ padding: '3px 6px', borderRadius: '4px', border: '0.5px solid #444', background: '#0f0f1a', color: '#fff', fontSize: '12px' }}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div style={{ padding: '10px 12px', borderTop: '0.5px solid #2d2d3a' }}>
+                          <button
+                            onClick={() => {
+                              const selected = selectedTaskIds.map(id => {
+                                const task = m.tasks!.find((t: any) => t.id === id);
+                                const times = taskTimes[id] || { start: '', end: '' };
+                                return {
+                                  id: task.id,
+                                  task_name: task.task_name,
+                                  projectName: task.project_name,
+                                  source: 'PMS',
+                                  isLocked: false,
+                                  startTime: times.start || null,
+                                  endTime: times.end || null,
+                                };
+                              });
+
+                              const unselected = m.tasks!
+                                .filter((t: any) => !selectedTaskIds.includes(t.id))
+                                .map((t: any) => ({
+                                  taskId: t.id,
+                                  taskName: t.task_name,
+                                  reason: 'Postponed via ARIA plan selector widget',
+                                  newDueDate: t.end_date || new Date().toISOString().split('T')[0],
+                                }));
+
+                              if (selected.length === 0) {
+                                alert('Please select at least one task.');
+                                return;
+                              }
+
+                              // Mark widget as submitted
+                              setMessages(prev =>
+                                prev.map(msg => msg.id === m.id ? { ...msg, planSubmitted: true } : msg)
+                              );
+
+                              // Reset state
+                              setSelectedTaskIds([]);
+                              setTaskTimes({});
+
+                              // Send structured message back to ARIA
+                              const payload = JSON.stringify({ selectedTasks: selected, unselectedTasks: unselected });
+                              sendMessage(
+                                `I have selected these tasks for my daily plan today. Please show me a summary and ask for my confirmation before submitting: ${payload}`,
+                                `📋 Submitting daily plan with ${selected.length} task${selected.length > 1 ? 's' : ''}...`
+                              );
+                            }}
                             style={{
-                              display: 'flex', alignItems: 'center',
-                              justifyContent: 'space-between',
-                              padding: '8px 10px', borderRadius: '8px', cursor: 'pointer',
-                              background: selectedTasks[proj.id] ? 'rgba(124,58,237,0.15)' : t.suggestionBg,
-                              border: `1px solid ${selectedTasks[proj.id] ? '#7c3aed' : t.suggestionBorder}`,
-                              fontSize: '12px', transition: 'all .15s',
+                              width: '100%',
+                              padding: '9px',
+                              background: selectedTaskIds.length > 0 ? '#534AB7' : '#2d2b3e',
+                              color: selectedTaskIds.length > 0 ? '#fff' : '#666',
+                              border: 'none',
+                              borderRadius: '8px',
+                              fontSize: '13px',
+                              fontWeight: 600,
+                              cursor: selectedTaskIds.length > 0 ? 'pointer' : 'not-allowed',
+                              transition: 'all 0.15s',
                             }}
                           >
-                            <div>
-                              <div style={{ fontWeight: '500', color: t.botText }}>{proj.project_name}</div>
-                              <div style={{ fontSize: '10px', color: t.subText }}>{proj.project_code} • {proj.progress}%</div>
-                            </div>
-                            <div style={{
-                              width: '16px', height: '16px', borderRadius: '4px',
-                              border: `1.5px solid ${selectedTasks[proj.id] ? '#7c3aed' : t.suggestionBorder}`,
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            }}>
-                              {selectedTasks[proj.id] && <Check style={{ width: '10px', height: '10px', color: '#7c3aed' }} />}
-                            </div>
-                          </div>
-                        ))}
+                            {selectedTaskIds.length > 0
+                              ? `Submit Plan (${selectedTaskIds.length} task${selectedTaskIds.length > 1 ? 's' : ''})`
+                              : 'Select tasks above'}
+                          </button>
+                        </div>
                       </div>
-                      <button
-                        onClick={() => handleSubmitDailyPlan(m.id, m.projects!)}
-                        style={{
-                          marginTop: '10px', width: '100%', padding: '8px',
-                          background: 'linear-gradient(135deg,#7c3aed,#4f46e5)',
-                          border: 'none', borderRadius: '8px',
-                          color: 'white', fontSize: '12px', fontWeight: '600',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Create Daily Plan
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
+                    )}
 
-              {/* Standalone loading indicator (when no empty bubble yet) */}
-              {loading && messages[messages.length - 1]?.role === 'user' && (
-                <div className="aria-msg" style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
-                  <div style={{
-                    width: '24px', height: '24px', borderRadius: '50%',
-                    background: 'linear-gradient(135deg,#7c3aed,#4f46e5)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px',
-                  }}>🤖</div>
-                  <div style={{
-                    background: t.botBubble, border: `1px solid ${t.botBorder}`,
-                    borderRadius: '16px 16px 16px 4px', padding: '8px 12px',
-                  }}>
-                    <ARIALoader />
+                    {/* Daily plan selector */}
+                    {m.projects && m.projects.length > 0 && !m.planSubmitted && (
+                      <div style={{
+                        marginTop: '8px', width: '100%',
+                        background: t.botBubble,
+                        border: `1px solid ${t.botBorder}`,
+                        borderRadius: '12px', padding: '12px',
+                      }}>
+                        <div style={{ fontSize: '11px', fontWeight: '600', color: '#a78bfa', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <ListTodo style={{ width: '14px', height: '14px' }} />
+                          Select projects for your daily plan:
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
+                          {m.projects.map((proj) => (
+                            <div
+                              key={proj.id}
+                              onClick={() => handleToggleTask(proj.id)}
+                              style={{
+                                display: 'flex', alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '8px 10px', borderRadius: '8px', cursor: 'pointer',
+                                background: selectedTasks[proj.id] ? 'rgba(124,58,237,0.15)' : t.suggestionBg,
+                                border: `1px solid ${selectedTasks[proj.id] ? '#7c3aed' : t.suggestionBorder}`,
+                                fontSize: '12px', transition: 'all .15s',
+                              }}
+                            >
+                              <div>
+                                <div style={{ fontWeight: '500', color: t.botText }}>{proj.project_name}</div>
+                                <div style={{ fontSize: '10px', color: t.subText }}>{proj.project_code} • {proj.progress}%</div>
+                              </div>
+                              <div style={{
+                                width: '16px', height: '16px', borderRadius: '4px',
+                                border: `1.5px solid ${selectedTasks[proj.id] ? '#7c3aed' : t.suggestionBorder}`,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              }}>
+                                {selectedTasks[proj.id] && <Check style={{ width: '10px', height: '10px', color: '#7c3aed' }} />}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => handleSubmitDailyPlan(m.id, m.projects!)}
+                          style={{
+                            marginTop: '10px', width: '100%', padding: '8px',
+                            background: 'linear-gradient(135deg,#7c3aed,#4f46e5)',
+                            border: 'none', borderRadius: '8px',
+                            color: 'white', fontSize: '12px', fontWeight: '600',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Create Daily Plan
+                        </button>
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
+                ))}
 
-              <div ref={messagesEndRef} />
+                {/* Standalone loading indicator (when no empty bubble yet) */}
+                {loading && messages[messages.length - 1]?.role === 'user' && (
+                  <div className="aria-msg" style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
+                    <div style={{
+                      width: '24px', height: '24px', borderRadius: '50%',
+                      background: 'linear-gradient(135deg,#7c3aed,#4f46e5)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px',
+                    }}>🤖</div>
+                    <div style={{
+                      background: t.botBubble, border: `1px solid ${t.botBorder}`,
+                      borderRadius: '16px 16px 16px 4px', padding: '8px 12px',
+                    }}>
+                      <ARIALoader />
+                    </div>
+                  </div>
+                )}
+
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Blob overlay — appears only when mic is active */}
+              {blobMode && (
+                <VoiceBlob
+                  mode={blobMode}
+                  onStop={blobMode === 'listening' ? stopRecording : stopSpeaking}
+                />
+              )}
             </div>
 
             {/* ── Input ── */}
-            <form
-              onSubmit={handleSend}
+            {/* Input bar */}
+            <div
+              className="input-bar"
               style={{
                 borderTop: `1px solid ${t.footerBorder}`,
                 padding: '12px', background: t.footerBg,
@@ -640,10 +1334,11 @@ export default function ChatPanel() {
               }}
             >
               <input
+                type="text"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSend(e)}
                 placeholder="Ask ARIA anything..."
-                disabled={loading}
                 style={{
                   flex: 1, height: '38px', borderRadius: '10px',
                   background: t.inputBg,
@@ -651,25 +1346,56 @@ export default function ChatPanel() {
                   color: t.inputText, fontSize: '13px',
                   padding: '0 12px', outline: 'none',
                 }}
-                onFocus={(e) => e.target.style.borderColor = '#7c3aed'}
-                onBlur={(e) => e.target.style.borderColor = t.inputBorder}
               />
+
+              {blobMode === 'speaking' && (
+                <button
+                  onClick={stopSpeaking}
+                  title="Stop speaking"
+                  style={{
+                    width: '38px', height: '38px',
+                    borderRadius: '50%',
+                    background: 'rgba(239,68,68,0.1)',
+                    border: '1.5px solid rgba(239,68,68,0.4)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', flexShrink: 0
+                  }}
+                >
+                  <span style={{ fontSize: '10px', color: '#ff4444' }}>⏹</span>
+                </button>
+              )}
+
+              {/* Mic button — right side */}
               <button
-                type="submit"
-                disabled={loading || !input.trim()}
-                className="aria-send"
+                onClick={toggleRecording}
+                aria-label="Voice input"
                 style={{
-                  width: '38px', height: '38px', borderRadius: '10px', flexShrink: 0,
-                  background: loading || !input.trim()
-                    ? 'rgba(124,58,237,0.3)'
-                    : 'linear-gradient(135deg,#7c3aed,#4f46e5)',
-                  border: 'none', cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white',
+                  width: '38px', height: '38px',
+                  borderRadius: '50%',
+                  background: isRecording ? 'rgba(239,68,68,0.1)' : 'rgba(29,158,117,0.1)',
+                  border: isRecording ? '1.5px solid rgba(239,68,68,0.4)' : '1.5px solid rgba(29,158,117,0.4)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', flexShrink: 0
                 }}
               >
-                <Send style={{ width: '15px', height: '15px' }} />
+                <Mic style={{ width: '18px', height: '18px', color: isRecording ? '#ff4444' : '#1D9E75' }} />
               </button>
-            </form>
+
+              {/* Send button */}
+              <button
+                onClick={() => handleSend()}
+                style={{
+                  width: '38px', height: '38px',
+                  borderRadius: '50%',
+                  background: '#1D9E75',
+                  border: 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', flexShrink: 0
+                }}
+              >
+                <Send style={{ width: '15px', height: '15px', color: '#fff' }} />
+              </button>
+            </div>
           </div>
         )}
 

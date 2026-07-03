@@ -28,6 +28,8 @@ import { useToast } from '@/hooks/use-toast';
 import type { TimeEntry, Employee } from '@shared/schema';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
+import reportsIllustration from '@/assets/animations/reports-illustration.png';
+import reportsIllustrationDark from '@/assets/animations/reports-illustration-dark-v2.png';
 
 interface ReportsPageProps {
   user: User;
@@ -183,103 +185,130 @@ export default function ReportsPage({ user }: ReportsPageProps) {
 
   return (
     <div className="p-4 md:p-6 space-y-6" data-testid="reports-page">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white" style={{ fontFamily: 'Space Grotesk' }}>
-            {isEmployee ? 'My Reports' : 'Timesheet Reports'}
-          </h1>
-          <p className="text-blue-200/60 text-sm">
-            {isEmployee
-              ? 'View your timesheet status, approvals, and detailed reports'
-              : 'View employee timesheet status, approvals, and detailed reports'}
-          </p>
+      <Card className="reports-top-container relative py-4 px-6 overflow-hidden">
+        {/* Header Row */}
+        <div className="reports-header-row flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10 md:w-[70%]">
+          <div>
+            <h1 className="text-2xl font-bold text-white" style={{ fontFamily: 'Space Grotesk' }}>
+              {isEmployee ? 'My Reports' : 'Timesheet Reports'}
+            </h1>
+            <p className="text-blue-200/60 text-sm">
+              {isEmployee
+                ? 'View your timesheet status, approvals, and detailed reports'
+                : 'View employee timesheet status, approvals, and detailed reports'}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              className="bg-slate-800 border-blue-500/20 text-white"
+              onClick={() => refetch()}
+              data-testid="button-refresh-reports"
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Refresh
+            </Button>
+            <Button
+              onClick={handleExportToExcel}
+              className="bg-gradient-to-r from-green-600 to-emerald-600"
+              disabled={filteredEntries.length === 0}
+              data-testid="button-export-reports"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export
+            </Button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            className="bg-slate-800 border-blue-500/20 text-white"
-            onClick={() => refetch()}
-            data-testid="button-refresh-reports"
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
-          </Button>
-          <Button
-            onClick={handleExportToExcel}
-            className="bg-gradient-to-r from-green-600 to-emerald-600"
-            disabled={filteredEntries.length === 0}
-            data-testid="button-export-reports"
-          >
-            <Download className="w-4 h-4 mr-2" />
-            Export
-          </Button>
+        {/* Stats Row */}
+        <div className="reports-stats-row flex flex-wrap md:flex-nowrap gap-3 relative z-10 md:w-[70%] mt-4">
+          <Card className="bg-slate-800/50 border-blue-500/20 p-4 reports-stat-card">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-blue-500/20">
+                <FileSpreadsheet className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <p className="text-xs text-blue-200/60">Total Entries</p>
+                <p className="text-2xl font-bold text-blue-400">{timeEntries.length}</p>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="bg-slate-800/50 border-green-500/20 p-4 reports-stat-card">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-green-500/20">
+                <Check className="w-5 h-5 text-green-400" />
+              </div>
+              <div>
+                <p className="text-xs text-blue-200/60">Approved</p>
+                <p className="text-2xl font-bold text-green-400">{totalApproved}</p>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="bg-slate-800/50 border-yellow-500/20 p-4 reports-stat-card">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-yellow-500/20">
+                <Clock className="w-5 h-5 text-yellow-400" />
+              </div>
+              <div>
+                <p className="text-xs text-blue-200/60">Pending</p>
+                <p className="text-2xl font-bold text-yellow-400">{totalPending}</p>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="bg-slate-800/50 border-red-500/20 p-4 reports-stat-card">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-red-500/20">
+                <X className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <p className="text-xs text-blue-200/60">Rejected</p>
+                <p className="text-2xl font-bold text-red-400">{totalRejected}</p>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="bg-slate-800/50 border-orange-500/20 p-4 reports-stat-card">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-orange-500/20">
+                <Clock className="w-5 h-5 text-orange-400" />
+              </div>
+              <div>
+                <p className="text-xs text-blue-200/60">On Hold</p>
+                <p className="text-2xl font-bold text-orange-400">{totalOnHold}</p>
+              </div>
+            </div>
+          </Card>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-slate-800/50 border-blue-500/20 p-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-blue-500/20">
-              <FileSpreadsheet className="w-5 h-5 text-blue-400" />
-            </div>
-            <div>
-              <p className="text-xs text-blue-200/60">Total Entries</p>
-              <p className="text-2xl font-bold text-blue-400">{timeEntries.length}</p>
-            </div>
-          </div>
-        </Card>
+        {/* Illustration slot — light mode shows image, dark mode reserved */}
+        <img
+          src={reportsIllustration}
+          alt="Reports illustration"
+          className="reports-illustration-light"
+          style={{ position: 'absolute', right: 0, bottom: 0, width: '300px', height: '220px', objectFit: 'contain', filter: 'invert(1) hue-rotate(180deg)', zIndex: 5 }}
+        />
+        {/* Dark mode illustration */}
+        <img
+          src={reportsIllustrationDark}
+          alt="illustration"
+          className="reports-illustration-dark"
+          style={{
+            width: '280px',
+            height: '200px',
+            objectFit: 'contain',
+            position: 'absolute',
+            right: '0',
+            bottom: '0',
+            zIndex: 5,
+          }}
+        />
+      </Card>
 
-        <Card className="bg-slate-800/50 border-green-500/20 p-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-green-500/20">
-              <Check className="w-5 h-5 text-green-400" />
-            </div>
-            <div>
-              <p className="text-xs text-blue-200/60">Approved</p>
-              <p className="text-2xl font-bold text-green-400">{totalApproved}</p>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="bg-slate-800/50 border-yellow-500/20 p-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-yellow-500/20">
-              <Clock className="w-5 h-5 text-yellow-400" />
-            </div>
-            <div>
-              <p className="text-xs text-blue-200/60">Pending</p>
-              <p className="text-2xl font-bold text-yellow-400">{totalPending}</p>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="bg-slate-800/50 border-red-500/20 p-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-red-500/20">
-              <X className="w-5 h-5 text-red-400" />
-            </div>
-            <div>
-              <p className="text-xs text-blue-200/60">Rejected</p>
-              <p className="text-2xl font-bold text-red-400">{totalRejected}</p>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="bg-slate-800/50 border-orange-500/20 p-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-orange-500/20">
-              <Clock className="w-5 h-5 text-orange-400" />
-            </div>
-            <div>
-              <p className="text-xs text-blue-200/60">On Hold</p>
-              <p className="text-2xl font-bold text-orange-400">{totalOnHold}</p>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      <Card className="bg-slate-800/50 border-blue-500/20 p-4">
+      <Card className="bg-slate-800/50 border-blue-500/20 p-4 reports-filter-bar">
         <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
           <div className="flex flex-col sm:flex-row gap-4 flex-1 w-full md:w-auto">
             <div className="relative flex-1 max-w-sm">
@@ -371,7 +400,7 @@ export default function ReportsPage({ user }: ReportsPageProps) {
           <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
         </div>
       ) : employeeList.length === 0 ? (
-        <Card className="bg-slate-800/50 border-blue-500/20 p-12 text-center">
+        <Card className="bg-slate-800/50 border-blue-500/20 p-12 text-center reports-stat-card">
           <FileSpreadsheet className="w-12 h-12 text-blue-400/40 mx-auto mb-4" />
           <p className="text-blue-200/60">No timesheet entries found.</p>
         </Card>
@@ -387,7 +416,7 @@ export default function ReportsPage({ user }: ReportsPageProps) {
             return (
               <Card
                 key={group.employeeId}
-                className="bg-slate-800/50 border-blue-500/20 overflow-hidden"
+                className="bg-slate-800/50 border-blue-500/20 overflow-hidden reports-employee-card"
                 data-testid={`card-employee-${group.employeeId}`}
               >
                 <div
@@ -434,7 +463,7 @@ export default function ReportsPage({ user }: ReportsPageProps) {
                     {group.entries.map(entry => (
                       <div
                         key={entry.id}
-                        className="bg-slate-700/30 rounded-lg p-4 space-y-3"
+                        className="bg-slate-700/30 rounded-lg p-4 space-y-3 reports-entry-card"
                         data-testid={`entry-${entry.id}`}
                       >
                         <div className="flex items-start justify-between gap-4">

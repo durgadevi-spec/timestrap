@@ -92,7 +92,7 @@ function AuthenticatedApp() {
             showDatePicker={location === '/tracker'}
             onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           />
-          <main className="flex-1 overflow-auto bg-slate-950">
+          <main className="flex-1 overflow-auto bg-slate-950" data-testid="main-content">
             <Switch>
               <Route path="/">
                 <Redirect to="/tracker" />

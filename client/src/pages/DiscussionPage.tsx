@@ -28,7 +28,8 @@ import {
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import type { TimeEntry, Discussion } from '@shared/schema';
+import type { TimeEntry, Discussion, Employee } from '@shared/schema';
+
 
 export default function DiscussionPage() {
     const { user } = useAuth();
@@ -63,15 +64,34 @@ export default function DiscussionPage() {
         enabled: !!user && user.role === 'employee',
     });
 
+    // Fetch employees to resolve heldBy (approvedBy) IDs to names
+    const { data: employees = [] } = useQuery<Employee[]>({
+        queryKey: ['/api/employees'],
+        enabled: !!user,
+    });
+
     const onHoldEntriesData = (user.role === 'admin' || user.role === 'manager' ? allTimeEntriesData : myOnHoldEntriesData);
     const onHoldEntries = Array.isArray(onHoldEntriesData) ? onHoldEntriesData.filter(e => e.status === 'on_hold') : [];
     const safeDiscussions = Array.isArray(discussions) ? discussions : [];
+
+    // Map employee ID to employee for quick lookup
+    const employeeMap = new Map<string, Employee>(
+        Array.isArray(employees) ? employees.map(emp => [emp.id, emp]) : []
+    );
+
+    // Helper to find who held the task (uses approvedBy or managerApprovedBy)
+    const getHeldBy = (entry: TimeEntry): Employee | null => {
+        const heldById = entry.approvedBy || entry.managerApprovedBy;
+        if (!heldById) return null;
+        return employeeMap.get(heldById) || null;
+    };
 
     const filteredOnHold = onHoldEntries.filter(e =>
         e.employeeName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         e.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         e.taskDescription.toLowerCase().includes(searchQuery.toLowerCase())
     );
+
 
     const sendMutation = useMutation({
         mutationFn: async (newMessage: string) => {
@@ -153,6 +173,7 @@ export default function DiscussionPage() {
                                         <TableHead className="text-blue-400 font-bold text-xs uppercase tracking-wider">Project</TableHead>
                                         <TableHead className="text-blue-400 font-bold text-xs uppercase tracking-wider">Task Description</TableHead>
                                         <TableHead className="text-blue-400 font-bold text-xs uppercase tracking-wider">On Hold Reason</TableHead>
+                                        <TableHead className="text-blue-400 font-bold text-xs uppercase tracking-wider">Held By</TableHead>
                                         <TableHead className="text-blue-400 font-bold text-xs uppercase tracking-wider text-center">Date</TableHead>
                                         <TableHead className="text-blue-400 font-bold text-xs uppercase tracking-wider text-center">Completion</TableHead>
                                         <TableHead className="text-blue-400 font-bold text-xs uppercase tracking-wider text-right pr-6">Action</TableHead>
@@ -161,7 +182,8 @@ export default function DiscussionPage() {
                                 <TableBody>
                                     {filteredOnHold.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={7} className="h-64 text-center">
+                                            <TableCell colSpan={8} className="h-64 text-center">
+
                                                 <div className="flex flex-col items-center justify-center text-blue-300/30">
                                                     <Layout className="w-12 h-12 mb-2 opacity-10" />
                                                     <p className="text-sm italic">No entries found for discussion.</p>
@@ -200,9 +222,33 @@ export default function DiscussionPage() {
                                                         </p>
                                                     </div>
                                                 </TableCell>
+                                                <TableCell>
+                                                    {(() => {
+                                                        const heldBy = getHeldBy(e);
+                                                        if (heldBy) {
+                                                            return (
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 p-[1px] shrink-0">
+                                                                        <div className="w-full h-full rounded-full bg-slate-950 flex items-center justify-center">
+                                                                            <span className="text-[9px] font-bold text-purple-300">{heldBy.name.charAt(0)}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="min-w-0">
+                                                                        <div className="text-xs font-semibold text-white truncate" title={heldBy.name}>{heldBy.name}</div>
+                                                                        <div className="text-[9px] text-purple-300/70 uppercase">{heldBy.employeeCode}</div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        return (
+                                                            <span className="text-[10px] italic text-blue-300/40">Unknown</span>
+                                                        );
+                                                    })()}
+                                                </TableCell>
                                                 <TableCell className="text-center text-xs text-blue-200/40">
                                                     {e.date ? format(parseISO(e.date), 'MMM dd, yyyy') : 'N/A'}
                                                 </TableCell>
+
                                                 <TableCell className="text-center">
                                                     <div className="flex flex-col items-center gap-1">
                                                         <div className="w-full bg-blue-500/10 h-1 rounded-full overflow-hidden max-w-[60px]">
@@ -287,6 +333,32 @@ export default function DiscussionPage() {
                                         <div className="text-white text-xs">{entry.percentageComplete}%</div>
                                     </div>
                                 </div>
+                                                {(() => {
+                                                    const heldBy = getHeldBy(entry);
+                                                    if (heldBy) {
+                                                        return (
+                                                            <div className="bg-purple-500/5 p-3 rounded-lg border border-purple-500/20 space-y-2">
+                                                                <div className="flex items-center gap-2 text-purple-400">
+                                                                    <UserIcon className="w-4 h-4" />
+                                                                    <span className="text-[10px] font-bold uppercase tracking-wider">Held By</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 p-[1px] shrink-0">
+                                                                        <div className="w-full h-full rounded-full bg-slate-950 flex items-center justify-center">
+                                                                            <span className="text-[10px] font-bold text-purple-300">{heldBy.name.charAt(0)}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="min-w-0">
+                                                                        <div className="text-xs font-semibold text-white truncate">{heldBy.name}</div>
+                                                                        <div className="text-[9px] text-purple-300/70 uppercase">{heldBy.employeeCode}</div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return null;
+                                                })()}
+
                                 <div className="bg-orange-500/5 p-3 rounded-lg border border-orange-500/20 space-y-2">
                                     <div className="flex items-center gap-2 text-orange-400">
                                         <AlertCircle className="w-4 h-4" />
@@ -298,6 +370,7 @@ export default function DiscussionPage() {
                                 </div>
                             </Card>
                         )}
+
                     </div>
 
                     <div className="lg:col-span-2 flex flex-col bg-slate-900/40 border border-blue-500/20 rounded-xl overflow-hidden relative shadow-2xl">

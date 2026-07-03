@@ -64,7 +64,7 @@ export default function MascotDolls() {
                         <motion.img
                             src={mascotImage}
                             alt="Doll"
-                            className="w-32 h-32 object-contain drop-shadow-2xl"
+                            className="w-32 h-32 object-contain drop-shadow-2xl aria-robot-mascot"
                             animate={{
                                 y: [0, -15, 0],
                                 rotateZ: [-10, 10, -10],

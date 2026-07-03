@@ -220,23 +220,24 @@ export default function EODReportsPage({ user }: EODReportsPageProps) {
       {/* KPI Section */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
         {[
-          { title: "Total Employees", value: stats.total, icon: Users, color: "blue", sub: "Registered staff" },
-          { title: "Submitted", value: stats.submitted, icon: CheckCircle2, color: "emerald", sub: "Full compliance" },
-          { title: "Incomplete", value: stats.incomplete, icon: AlertTriangle, color: "amber", sub: "Logged < 8h" },
-          { title: "Not Submitted", value: stats.notSubmitted, icon: XCircle, color: "rose", sub: "Missing today" },
+          { title: "Total Employees", value: stats.total, icon: Users, color: "blue", sub: "Registered staff", cardClass: "eod-card-blue" },
+          { title: "Submitted", value: stats.submitted, icon: CheckCircle2, color: "emerald", sub: "Full compliance", cardClass: "eod-card-green" },
+          { title: "Incomplete", value: stats.incomplete, icon: AlertTriangle, color: "amber", sub: "Logged < 8h", cardClass: "eod-card-amber" },
+          { title: "Not Submitted", value: stats.notSubmitted, icon: XCircle, color: "rose", sub: "Missing today", cardClass: "eod-card-red" },
           {
             title: "Compliance %",
             value: `${stats.compliance.toFixed(1)}%`,
             icon: TrendingUp,
             color: stats.compliance < 80 ? "rose" : "purple",
             sub: "Organization target: 80%",
-            alert: stats.compliance < 80
+            alert: stats.compliance < 80,
+            cardClass: "eod-card-purple"
           },
-          { title: "Avg Hours", value: `${stats.avgHours.toFixed(1)}h`, icon: AlertTriangle, color: "amber", sub: "Logged today" }
+          { title: "Avg Hours", value: `${stats.avgHours.toFixed(1)}h`, icon: AlertTriangle, color: "amber", sub: "Logged today", cardClass: "eod-card-cyan" }
         ].map((kpi, i) => (
-          <Card key={i} className="bg-slate-900/40 border-slate-800/60 backdrop-blur-xl relative overflow-hidden group hover:border-slate-700/80 transition-all">
-            <div className={`absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity text-${kpi.color}-400`}>
-              <kpi.icon className="h-12 w-12" />
+          <Card key={i} className={`bg-slate-900/40 border-slate-800/60 backdrop-blur-xl relative overflow-hidden group hover:border-slate-700/80 transition-all eod-stat-card ${kpi.cardClass}`}>
+            <div className={`absolute right-[12px] top-[12px] opacity-15 text-${kpi.color}-400`}>
+              <kpi.icon className="w-[40px] h-[40px]" />
             </div>
             <CardHeader className="pb-2">
               <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{kpi.title}</CardTitle>
@@ -257,7 +258,7 @@ export default function EODReportsPage({ user }: EODReportsPageProps) {
 
       {/* Warning Badge for Compliance */}
       {stats.compliance < 80 && stats.total > 0 && (
-        <div className="bg-rose-500/10 border border-rose-500/20 rounded-xl p-4 flex items-center gap-4 animate-in fade-in slide-in-from-top-2 duration-500">
+        <div className="bg-rose-500/10 border border-rose-500/20 rounded-xl p-4 flex items-center gap-4 animate-in fade-in slide-in-from-top-2 duration-500 eod-alert-card">
           <div className="p-2 bg-rose-500 rounded-full">
             <AlertCircle className="h-5 w-5 text-white" />
           </div>
@@ -269,7 +270,7 @@ export default function EODReportsPage({ user }: EODReportsPageProps) {
       )}
 
       {/* Control Panel */}
-      <Card className="bg-slate-900/40 border-slate-800/60 backdrop-blur-md sticky top-0 z-10 shadow-2xl overflow-visible">
+      <Card className="bg-slate-900/40 border-slate-800/60 backdrop-blur-md sticky top-0 z-10 shadow-2xl overflow-visible eod-filter-bar">
         <CardContent className="p-4 flex flex-col md:flex-row gap-4">
           <div className="relative flex-1 group">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
@@ -340,7 +341,7 @@ export default function EODReportsPage({ user }: EODReportsPageProps) {
                 <h2 className="text-xl font-bold text-white uppercase tracking-wider text-sm">Activity Logs: Submitted & Incomplete</h2>
                 <Badge variant="outline" className="ml-2 bg-emerald-500/10 text-emerald-400 border-emerald-500/20">{activeEntries.length}</Badge>
               </div>
-              <Card className="bg-slate-900/40 border-slate-800/60 overflow-hidden shadow-2xl backdrop-blur-md">
+              <Card className="bg-slate-900/40 border-slate-800/60 overflow-hidden shadow-2xl backdrop-blur-md eod-table-card">
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader className="bg-slate-950/80">
@@ -359,7 +360,7 @@ export default function EODReportsPage({ user }: EODReportsPageProps) {
                         const hoursNum = parseFloat(row.workingHours);
                         const isUnderHours = hoursNum < row.requiredHours;
                         return (
-                          <TableRow key={row.employeeId + row.date} className="border-slate-800/60 hover:bg-slate-800/40 transition-all group">
+                          <TableRow key={row.employeeId + row.date} className="border-slate-800/60 hover:bg-slate-800/40 transition-all group eod-row-card">
                             <TableCell className="py-4 px-6">
                               <div className="flex items-center gap-3">
                                 <div className="h-10 w-10 rounded-full flex items-center justify-center font-bold text-sm bg-slate-800 border border-slate-700 text-blue-400 shadow-inner group-hover:scale-110 transition-transform">
@@ -429,7 +430,7 @@ export default function EODReportsPage({ user }: EODReportsPageProps) {
                 <h2 className="text-xl font-bold text-white uppercase tracking-wider text-sm">Missing Submissions: Not Submitted</h2>
                 <Badge variant="outline" className="ml-2 bg-rose-500/10 text-rose-400 border-rose-500/20">{missingEntries.length}</Badge>
               </div>
-              <Card className="bg-slate-900/40 border-slate-800/60 overflow-hidden shadow-2xl backdrop-blur-md">
+              <Card className="bg-slate-900/40 border-slate-800/60 overflow-hidden shadow-2xl backdrop-blur-md eod-table-card">
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader className="bg-rose-950/10">
@@ -444,7 +445,7 @@ export default function EODReportsPage({ user }: EODReportsPageProps) {
                     </TableHeader>
                     <TableBody>
                       {missingEntries.map((row) => (
-                        <TableRow key={row.employeeId + row.date} className="border-slate-800/60 hover:bg-slate-800/40 transition-all group">
+                        <TableRow key={row.employeeId + row.date} className="border-slate-800/60 hover:bg-slate-800/40 transition-all group eod-row-card">
                           <TableCell className="py-4 px-6">
                             <div className="flex items-center gap-3">
                               <div className="h-10 w-10 rounded-full flex items-center justify-center font-bold text-sm bg-slate-800 border border-slate-700 text-rose-400 shadow-inner group-hover:scale-110 transition-transform">

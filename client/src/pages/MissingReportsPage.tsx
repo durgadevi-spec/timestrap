@@ -245,12 +245,12 @@ export default function MissingReportsPage({ user }: MissingReportsPageProps) {
       {/* KPI Section */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { title: "Total Records", value: stats.total, icon: Users, color: "blue" },
-          { title: "Submitted", value: stats.submitted, icon: FileSpreadsheet, color: "emerald" },
-          { title: "Missing", value: stats.missing, icon: UserX, color: "rose" },
-          { title: "On Leave", value: stats.onLeave, icon: Plane, color: "blue" },
+          { title: "Total Records", value: stats.total, icon: Users, color: "blue", className: "missing-card-blue" },
+          { title: "Submitted", value: stats.submitted, icon: FileSpreadsheet, color: "emerald", className: "missing-card-green" },
+          { title: "Missing", value: stats.missing, icon: UserX, color: "rose", className: "missing-card-red" },
+          { title: "On Leave", value: stats.onLeave, icon: Plane, color: "blue", className: "missing-card-amber" },
         ].map((kpi, i) => (
-          <Card key={i} className="bg-slate-900/40 border-slate-800/60 backdrop-blur-xl group hover:border-slate-700/80 transition-all">
+          <Card key={i} className={`bg-slate-900/40 border-slate-800/60 backdrop-blur-xl group hover:border-slate-700/80 transition-all missing-stat-card ${kpi.className}`}>
             <CardHeader className="pb-2">
               <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{kpi.title}</CardTitle>
             </CardHeader>

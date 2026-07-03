@@ -439,7 +439,7 @@ export default function PlanForDayPage() {
   const isNearCutoff = minutesUntilCutoff > 0 && minutesUntilCutoff <= 30;
 
   return (
-    <div className="min-h-screen bg-[#020617] text-white p-4 md:p-8">
+    <div className="min-h-screen bg-[#020617] text-white p-4 md:p-8 page-bg-fix">
       <header className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between mb-12 gap-6">
         <div className="flex items-center gap-6">
           <div className="w-16 h-16 bg-blue-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-blue-500/20">

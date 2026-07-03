@@ -151,6 +151,173 @@ function SidebarProvider({
   )
 }
 
+const sidebarLightModeStyles = `
+  /* Light mode specific double-inversion styling */
+  html[style*="invert"] [data-sidebar="sidebar"] {
+    filter: invert(1) hue-rotate(180deg) !important;
+  }
+
+  /* Reset container borders in Light Mode only */
+  html[style*="invert"] [data-slot="sidebar-container"] {
+    border-right: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Light Mode Sidebar background and right border */
+  html[style*="invert"] [data-sidebar="sidebar"] {
+    background: #1B3CC8 !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.12) !important;
+    box-shadow: none !important;
+  }
+
+  /* Light Mode Logo Area (Top) */
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="header"] {
+    background-color: transparent !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+    padding-top: 16px !important;
+    padding-bottom: 16px !important;
+    padding-left: 0px !important;
+    padding-right: 0px !important;
+  }
+
+  /* Light Mode Left alignment for Logo Area */
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="header"] > div {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    width: 100% !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  /* Light Mode Knockturn Logo size */
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="header"] img {
+    width: 140px !important;
+    height: auto !important;
+    object-fit: contain !important;
+    filter: none !important;
+  }
+
+  /* Light Mode Content background */
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="content"] {
+    background-color: transparent !important;
+  }
+
+  /* Hide scrollbar in sidebar for light mode only */
+  html[style*="invert"] [data-sidebar="sidebar"] * {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+  }
+  html[style*="invert"] [data-sidebar="sidebar"] *::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  /* Light Mode Menu Items (Default state) */
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="menu-button"] {
+    color: rgba(255, 255, 255, 0.85) !important;
+    background-color: transparent !important;
+    border: none !important;
+    border-radius: 8px !important;
+    margin: 4px 12px !important;
+    height: auto !important;
+    padding: 10px 16px !important;
+    width: auto !important;
+    transition: all 0.2s ease !important;
+  }
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="menu-button"] svg {
+    color: rgba(255, 255, 255, 0.75) !important;
+  }
+
+  /* Light Mode Menu Items (Hover state) */
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="menu-button"]:hover:not([data-active="true"]) {
+    background: rgba(255, 255, 255, 0.15) !important;
+    border: none !important;
+    color: #FFFFFF !important;
+    border-radius: 8px !important;
+    margin: 4px 12px !important;
+  }
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="menu-button"]:hover:not([data-active="true"]) svg {
+    color: #FFFFFF !important;
+  }
+
+  /* Light Mode Menu Items (Active/Selected state) */
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="menu-button"][data-active="true"] {
+    background: #FFFFFF !important;
+    border: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    color: #1B3CC8 !important;
+    border-radius: 8px !important;
+    margin: 4px 12px !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+    transform: none !important;
+    padding: 10px 16px !important;
+    font-weight: 600 !important;
+  }
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="menu-button"][data-active="true"] svg {
+    color: #1B3CC8 !important;
+  }
+
+  /* Light Mode Badge Counts (Approvals, Rejections, Discussions) */
+  html[style*="invert"] [data-sidebar="sidebar"] .bg-red-500,
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="menu-badge"] {
+    background-color: #FFFFFF !important;
+    color: #1557C0 !important;
+  }
+
+  /* Light Mode Dividers */
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="separator"] {
+    background-color: rgba(255, 255, 255, 0.12) !important;
+  }
+
+  /* Light Mode Bottom Area footer background reset */
+  html[style*="invert"] [data-sidebar="sidebar"] [data-sidebar="footer"] {
+    background-color: transparent !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.12) !important;
+  }
+
+
+  /* ========================================== */
+  /* GLOBAL STYLES FOR BOTH MODES               */
+  /* ========================================== */
+
+  /* Hide scrollbar but keep scroll functionality */
+  [data-sidebar="sidebar"],
+  [data-sidebar="sidebar"] * {
+    scrollbar-width: none !important;        /* Firefox */
+    -ms-overflow-style: none !important;     /* IE / Edge */
+  }
+  [data-sidebar="sidebar"]::-webkit-scrollbar,
+  [data-sidebar="sidebar"] *::-webkit-scrollbar {
+    display: none !important;                /* Chrome / Safari / Opera */
+  }
+
+  /* Remove black background from sidebar logo in both modes */
+  [data-sidebar="sidebar"] [data-sidebar="header"] img {
+    mix-blend-mode: screen !important;
+  }
+
+  /* Remove "Time Strap" logo text in both modes */
+  [data-sidebar="sidebar"] [data-sidebar="header"] span {
+    display: none !important;
+  }
+
+  /* Remove 'Time Strap' text from footer in both modes */
+  [data-sidebar="sidebar"] [data-sidebar="footer"] p {
+    display: none !important;
+  }
+
+  /* Dark mode specific logo container styling to ensure left alignment */
+  html:not([style*="invert"]) [data-sidebar="sidebar"] [data-sidebar="header"] > div {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    padding-left: 16px !important;
+  }
+`;
+
 function Sidebar({
   side = "left",
   variant = "sidebar",
@@ -167,89 +334,98 @@ function Sidebar({
 
   if (collapsible === "none") {
     return (
-      <div
-        data-slot="sidebar"
-        className={cn(
-          "bg-sidebar text-sidebar-foreground flex h-full w-[var(--sidebar-width)] flex-col",
-          className
-        )}
-        {...props}
-      >
-        {children}
-      </div>
+      <>
+        <style dangerouslySetInnerHTML={{ __html: sidebarLightModeStyles }} />
+        <div
+          data-slot="sidebar"
+          className={cn(
+            "bg-sidebar text-sidebar-foreground flex h-full w-[var(--sidebar-width)] flex-col",
+            className
+          )}
+          {...props}
+        >
+          {children}
+        </div>
+      </>
     )
   }
 
   if (isMobile) {
     return (
-      <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
-        <SheetContent
-          data-sidebar="sidebar"
-          data-slot="sidebar"
-          data-mobile="true"
-          className="bg-sidebar text-sidebar-foreground w-[var(--sidebar-width)] p-0 [&>button]:hidden"
-          style={
-            {
-              "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
-            } as React.CSSProperties
-          }
-          side={side}
-        >
-          <SheetHeader className="sr-only">
-            <SheetTitle>Sidebar</SheetTitle>
-            <SheetDescription>Displays the mobile sidebar.</SheetDescription>
-          </SheetHeader>
-          <div className="flex h-full w-full flex-col">{children}</div>
-        </SheetContent>
-      </Sheet>
+      <>
+        <style dangerouslySetInnerHTML={{ __html: sidebarLightModeStyles }} />
+        <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
+          <SheetContent
+            data-sidebar="sidebar"
+            data-slot="sidebar"
+            data-mobile="true"
+            className="bg-sidebar text-sidebar-foreground w-[var(--sidebar-width)] p-0 [&>button]:hidden"
+            style={
+              {
+                "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+              } as React.CSSProperties
+            }
+            side={side}
+          >
+            <SheetHeader className="sr-only">
+              <SheetTitle>Sidebar</SheetTitle>
+              <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+            </SheetHeader>
+            <div className="flex h-full w-full flex-col">{children}</div>
+          </SheetContent>
+        </Sheet>
+      </>
     )
   }
 
   return (
-    <div
-      className="group peer text-sidebar-foreground hidden md:block"
-      data-state={state}
-      data-collapsible={state === "collapsed" ? collapsible : ""}
-      data-variant={variant}
-      data-side={side}
-      data-slot="sidebar"
-    >
-      {/* This is what handles the sidebar gap on desktop */}
+    <>
+      <style dangerouslySetInnerHTML={{ __html: sidebarLightModeStyles }} />
       <div
-        data-slot="sidebar-gap"
-        className={cn(
-          "relative w-[var(--sidebar-width)] bg-transparent transition-[width] duration-200 ease-linear",
-          "group-data-[collapsible=offcanvas]:w-0",
-          "group-data-[side=right]:rotate-180",
-          variant === "floating" || variant === "inset"
-            ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+var(--spacing-4))]"
-            : "group-data-[collapsible=icon]:w-[var(--sidebar-width-icon)]"
-        )}
-      />
-      <div
-        data-slot="sidebar-container"
-        className={cn(
-          "fixed inset-y-0 z-10 hidden h-svh w-[var(--sidebar-width)] transition-[left,right,width] duration-200 ease-linear md:flex",
-          side === "left"
-            ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
-            : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
-          // Adjust the padding for floating and inset variants.
-          variant === "floating" || variant === "inset"
-            ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+var(--spacing-4)+2px)]"
-            : "group-data-[collapsible=icon]:w-[var(--sidebar-width-icon)] group-data-[side=left]:border-r group-data-[side=right]:border-l",
-          className
-        )}
-        {...props}
+        className="group peer text-sidebar-foreground hidden md:block"
+        data-state={state}
+        data-collapsible={state === "collapsed" ? collapsible : ""}
+        data-variant={variant}
+        data-side={side}
+        data-slot="sidebar"
       >
+        {/* This is what handles the sidebar gap on desktop */}
         <div
-          data-sidebar="sidebar"
-          data-slot="sidebar-inner"
-          className="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm"
+          data-slot="sidebar-gap"
+          className={cn(
+            "relative w-[var(--sidebar-width)] bg-transparent transition-[width] duration-200 ease-linear",
+            "group-data-[collapsible=offcanvas]:w-0",
+            "group-data-[side=right]:rotate-180",
+            variant === "floating" || variant === "inset"
+              ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+var(--spacing-4))]"
+              : "group-data-[collapsible=icon]:w-[var(--sidebar-width-icon)]"
+          )}
+        />
+        <div
+          data-slot="sidebar-container"
+          className={cn(
+            "fixed inset-y-0 z-10 hidden h-svh w-[var(--sidebar-width)] transition-[left,right,width] duration-200 ease-linear md:flex",
+            side === "left"
+              ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
+              : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+            // Adjust the padding for floating and inset variants.
+            variant === "floating" || variant === "inset"
+              ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+var(--spacing-4)+2px)]"
+              : "group-data-[collapsible=icon]:w-[var(--sidebar-width-icon)] group-data-[side=left]:border-r group-data-[side=right]:border-l",
+            className
+          )}
+          {...props}
         >
-          {children}
+          <div
+            data-sidebar="sidebar"
+            data-slot="sidebar-inner"
+            className="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm"
+          >
+            {children}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -518,7 +694,7 @@ function SidebarMenuButton({
       data-sidebar="menu-button"
       data-size={size}
       data-active={isActive}
-      className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
+      className={cn(sidebarMenuButtonVariants({ variant, size }), "sidebar-menu-item", className)}
       {...props}
     />
   )

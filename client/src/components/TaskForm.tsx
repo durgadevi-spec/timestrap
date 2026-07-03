@@ -209,11 +209,11 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
         const targetDate = date || new Date().toISOString().split('T')[0];
         const res = await fetch(`/api/daily-plans/${targetDate}/${authUser.id}`);
         if (res.ok) {
-           const json = await res.json();
-           if (json.submitted) setDailyPlan(json);
-           else setDailyPlan(null); // Reset if no plan for that date
+          const json = await res.json();
+          if (json.submitted) setDailyPlan(json);
+          else setDailyPlan(null); // Reset if no plan for that date
         } else {
-           setDailyPlan(null);
+          setDailyPlan(null);
         }
       } catch (err) {
         console.error('Failed to fetch daily plan:', err);
@@ -240,36 +240,36 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
       return res.json();
     },
     onSuccess: (newTask) => {
-       // Refresh plan tasks
-       setDailyPlan((prev: any) => ({ 
-          ...prev, 
-          tasks: [...(prev?.tasks || []), newTask] 
-       }));
-       setShowDeviationDialog(false);
-       setDeviationReason('');
-       setSelectedDeviationTask(null);
-       toast({ title: "Deviation Added", description: "This task is now available for timesheet entry." });
+      // Refresh plan tasks
+      setDailyPlan((prev: any) => ({
+        ...prev,
+        tasks: [...(prev?.tasks || []), newTask]
+      }));
+      setShowDeviationDialog(false);
+      setDeviationReason('');
+      setSelectedDeviationTask(null);
+      toast({ title: "Deviation Added", description: "This task is now available for timesheet entry." });
     },
     onError: (err: any) => {
-       toast({ title: "Error", description: err.message || "Failed to add deviation", variant: "destructive" });
+      toast({ title: "Error", description: err.message || "Failed to add deviation", variant: "destructive" });
     }
   });
 
   const handleAddDeviation = () => {
-     if (!selectedDeviationTask || !deviationReason) {
-        toast({ title: "Selection Required", description: "Please select a task and provide a reason.", variant: "destructive" });
-        return;
-     }
+    if (!selectedDeviationTask || !deviationReason) {
+      toast({ title: "Selection Required", description: "Please select a task and provide a reason.", variant: "destructive" });
+      return;
+    }
 
-     const projectCode = projects.find(p => p.project_name === formData.project)?.project_code;
+    const projectCode = projects.find(p => p.project_name === formData.project)?.project_code;
 
-     addDeviationMutation.mutate({
-        employeeId: authUser?.id,
-        taskId: selectedDeviationTask.id,
-        taskName: selectedDeviationTask.task_name,
-        projectName: formData.project,
-        reason: deviationReason
-     });
+    addDeviationMutation.mutate({
+      employeeId: authUser?.id,
+      taskId: selectedDeviationTask.id,
+      taskName: selectedDeviationTask.task_name,
+      projectName: formData.project,
+      reason: deviationReason
+    });
   };
 
   /* ✅ ADDED – fetch tasks when project changes */
@@ -463,15 +463,68 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
       try {
         if (formData.percentageComplete === 100 && formData.project) {
           const projectId = formData.project;
-          const res = (require('@/lib/gamification') as any).addPointsForProject(projectId, 10, 'task-complete');
-          try { const { toast } = require('@/hooks/use-toast'); if (res.pointsAdded) toast({ title: `+${res.pointsAdded} pts`, description: `Great! You earned points for completing this task.` }); } catch { }
+          // Determine if the task is overdue by comparing its due date to today
+          // formData.date is the date the work is logged; PMS due date may be
+          // available via pms_due_date or endDate (rare on this form). Fall back
+          // to the form date itself.
+          let dueDateIso: string | null = null;
+          try {
+            const candidate: any = (formData as any).pms_due_date
+              || (formData as any).endDate
+              || (formData as any).dueDate
+              || (formData as any).end_date
+              || (formData as any).date;
+            if (candidate) {
+              const d = new Date(candidate);
+              if (!isNaN(d.getTime())) {
+                // Only consider "due date" overdue if it's a strictly earlier
+                // calendar day than today.
+                const due = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+                const today = new Date();
+                const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                if (due.getTime() < t.getTime()) dueDateIso = due.toISOString();
+              }
+            }
+          } catch { }
+          const taskName = (formData as any).title || 'Task';
+          const isOverdue = !!dueDateIso;
+          // If overdue, deduct points (negative) — using the new gamification
+          // API that also records the entry for the daily summary dialog.
+          // Otherwise add 10 points and record the earned entry.
+          try {
+            const gam = require('@/lib/gamification');
+            if (isOverdue) {
+              const res = (gam as any).subtractPointsForProject(
+                projectId,
+                5,
+                'task-overdue',
+                { taskName, overdue: true }
+              );
+              try { const { toast } = require('@/hooks/use-toast'); if (res.pointsRemoved) toast({ title: `Overdue: -${res.pointsRemoved} pts`, description: `Task "${taskName}" completed after its due date.`, variant: 'destructive' }); } catch { }
+            } else {
+              const res = (gam as any).addPointsForProject(
+                projectId,
+                10,
+                'task-complete',
+                { taskName, onTime: true }
+              );
+              try { const { toast } = require('@/hooks/use-toast'); if (res.pointsAdded) toast({ title: `+${res.pointsAdded} pts`, description: `Great! You earned points for completing this task.` }); } catch { }
+            }
+          } catch (e) {
+            // Fallback to legacy call (no metadata) so the existing flow
+            // still works even if our new arg shape is unsupported.
+            try {
+              const res = (require('@/lib/gamification') as any).addPointsForProject(projectId, isOverdue ? -5 : 10, 'task-complete');
+              try { const { toast } = require('@/hooks/use-toast'); if (res && res.pointsAdded) toast({ title: `+${res.pointsAdded} pts`, description: `Great! You earned points for completing this task.` }); } catch { }
+            } catch { }
+          }
         }
       } catch (e) { }
     } catch { }
   };
 
   return (
-    <Card className="bg-slate-800/50 border-blue-500/20">
+    <Card className="bg-slate-800/50 border-blue-500/20 tracker-task-form-card">
       <CardHeader className="pb-4">
         <CardTitle className="text-lg text-white flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-3">
@@ -504,7 +557,7 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
               <Button
                 size="sm"
                 onClick={startRecording}
-                className="bg-green-600 hover:bg-green-500"
+                className="bg-green-600 hover:bg-green-500 tracker-btn-start-recording"
                 data-testid="button-start-recording"
               >
                 <Play className="w-4 h-4 mr-2" />
@@ -527,7 +580,7 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="project" className="text-blue-100">Project *</Label>
+              <Label htmlFor="project" className="text-blue-100 tracker-form-label">Project *</Label>
               <Select
                 value={formData.project}
                 onValueChange={(v) => {
@@ -541,10 +594,10 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                   } catch { }
                 }}
               >
-                <SelectTrigger className="bg-slate-700/50 border-blue-500/20 text-white" data-testid="select-project">
+                <SelectTrigger className="tracker-form-input" data-testid="select-project" data-radix-select-trigger>
                   <SelectValue placeholder="Select a project" />
                 </SelectTrigger>
-                <SelectContent className="max-h-[300px]">
+                <SelectContent className="max-h-[300px] tracker-select-content">
                   <div className="flex items-center px-3 pb-2 pt-1 border-b border-blue-500/10">
                     <Search className="w-3.5 h-3.5 text-blue-400/50 mr-2" />
                     <input
@@ -572,7 +625,7 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="keyStep" className="text-blue-100">Key Step</Label>
+              <Label htmlFor="keyStep" className="text-blue-100 tracker-form-label">Key Step</Label>
               <Select
                 value={(formData as any).keyStep || ''}
                 onValueChange={(v) => {
@@ -585,10 +638,10 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                   } catch { }
                 }}
               >
-                <SelectTrigger className="bg-slate-700/50 border-blue-500/20 text-white" data-testid="select-keystep">
+                <SelectTrigger className="tracker-form-input" data-testid="select-keystep" data-radix-select-trigger>
                   <SelectValue placeholder="Select key step" />
                 </SelectTrigger>
-                <SelectContent className="max-h-[300px]">
+                <SelectContent className="max-h-[300px] tracker-select-content">
                   {/* Ensure prefilled key step is visible even if not in fetched list */}
                   {formData.keyStep && !keySteps.find(k => k.name === formData.keyStep) && (
                     <SelectItem value={formData.keyStep}>{formData.keyStep}</SelectItem>
@@ -604,18 +657,20 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
             </div>
           </div>
 
+          <hr className="tracker-form-divider" />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="title" className="text-blue-100">Task *</Label>
-                   <button 
-                     type="button"
-                     onClick={() => setShowDeviationDialog(true)}
-                     className="text-[10px] text-amber-500 hover:text-amber-400 font-bold uppercase tracking-wider flex items-center gap-1"
-                   >
-                     <Plus className="w-3 h-3" />
-                     Add Deviation
-                   </button>
+                <Label htmlFor="title" className="text-blue-100 tracker-form-label">Task *</Label>
+                <button
+                  type="button"
+                  onClick={() => setShowDeviationDialog(true)}
+                  className="text-[10px] text-amber-500 hover:text-amber-400 font-bold uppercase tracking-wider flex items-center gap-1 tracker-add-deviation-btn"
+                >
+                  <Plus className="w-3 h-3" />
+                  Add Deviation
+                </button>
               </div>
               <Select
                 value={formData.title}
@@ -629,10 +684,10 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                   } catch { }
                 }}
               >
-                <SelectTrigger className="bg-slate-700/50 border-blue-500/20 text-white" data-testid="select-task">
+                <SelectTrigger className="tracker-form-input" data-testid="select-task">
                   <SelectValue placeholder="Select a task" />
                 </SelectTrigger>
-                <SelectContent className="max-h-[200px]">
+                <SelectContent className="max-h-[200px] tracker-select-content">
                   {/* Ensure prefilled task is visible even if not in fetched list */}
                   {sortedTasks.length > 0 ? (
                     sortedTasks.map(task => {
@@ -660,7 +715,7 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="subTask" className="text-blue-100">
+              <Label htmlFor="subTask" className="text-blue-100 tracker-form-label">
                 Sub Task {subtasks.length > 0 && <span className="text-red-400">*</span>}
               </Label>
               <Select
@@ -681,10 +736,10 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                 }}
                 data-testid="select-subtask"
               >
-                <SelectTrigger className="bg-slate-700/50 border-blue-500/20 text-white">
+                <SelectTrigger className="tracker-form-input">
                   <SelectValue placeholder="Select a sub task" />
                 </SelectTrigger>
-                <SelectContent className="bg-slate-800 border-blue-500/20">
+                <SelectContent className="bg-slate-800 border-blue-500/20 tracker-select-content">
                   {/* Ensure prefilled subtask is visible even if not in fetched list */}
                   {formData.subTask && !subtasks.find(s => s.title === formData.subTask) && (
                     <SelectItem value={formData.subTask}>{formData.subTask}</SelectItem>
@@ -703,9 +758,11 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
             </div>
           </div>
 
+          <hr className="tracker-form-divider" />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="quantify" className="text-blue-100">Quantify Your Result *</Label>
+              <Label htmlFor="quantify" className="text-blue-100 tracker-form-label">Quantify Your Result *</Label>
               <Input
                 id="quantify"
                 placeholder="Enter quantify (e.g., 5 reports, 10 calls)"
@@ -728,13 +785,13 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                     }
                   } catch { }
                 }}
-                className="bg-slate-700/50 border-blue-500/20 text-white"
+                className="tracker-form-input"
                 data-testid="input-quantify"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="achievements" className="text-blue-100">Achievements</Label>
+              <Label htmlFor="achievements" className="text-blue-100 tracker-form-label">Achievements</Label>
               <Input
                 id="achievements"
                 placeholder="What did you accomplish?"
@@ -755,15 +812,17 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                   } catch { }
                 }}
                 onBlur={() => { try { if (formData.achievements && formData.achievements.trim().length > 0) { playSound('wow'); speak('Wow, really great! Keep it up.'); popEmoji(document.querySelector('[data-testid="input-achievements"]') as HTMLElement, '🎉'); } } catch { } }}
-                className="bg-slate-700/50 border-blue-500/20 text-white"
+                className="tracker-form-input"
                 data-testid="input-achievements"
               />
             </div>
           </div>
 
+          <hr className="tracker-form-divider" />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="problemAndIssues" className="text-blue-100">Problems & Issues</Label>
+              <Label htmlFor="problemAndIssues" className="text-blue-100 tracker-form-label">Problems & Issues</Label>
               <Input
                 id="problemAndIssues"
                 placeholder="Enter any problems or issues faced"
@@ -771,13 +830,13 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                 onChange={(e) => setFormData({ ...formData, problemAndIssues: e.target.value })}
                 onFocus={(e) => { try { playSound('select', 2); if (Math.random() < 0.4) { speak('Any blockers? Tell me the problem.'); const el = (e.target || e.currentTarget) as HTMLElement | null; if (el) { const r = el.getBoundingClientRect(); window.dispatchEvent(new CustomEvent('mascot:showNear', { detail: { text: 'Any blockers? Tell me the problem.', rect: { left: r.left, top: r.top, width: r.width, height: r.height } } })); } } } catch { } }}
                 onBlur={() => { try { if (formData.problemAndIssues && formData.problemAndIssues.trim().length > 0) { playSound('confirm'); speak('Thanks for noting that — you are thorough.'); } } catch { } }}
-                className="bg-slate-700/50 border-blue-500/20 text-white"
+                className="tracker-form-input"
                 data-testid="input-problem-issues"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="scopeOfImprovements" className="text-blue-100">Scope of Improvements</Label>
+              <Label htmlFor="scopeOfImprovements" className="text-blue-100 tracker-form-label">Scope of Improvements</Label>
               <Input
                 id="scopeOfImprovements"
                 placeholder="Areas for improvement"
@@ -785,14 +844,16 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                 onChange={(e) => setFormData({ ...formData, scopeOfImprovements: e.target.value })}
                 onFocus={(e) => { try { playSound('select', 3); if (Math.random() < 0.4) { speak('How can this get even better?'); const el = (e.target || e.currentTarget) as HTMLElement | null; if (el) { const r = el.getBoundingClientRect(); window.dispatchEvent(new CustomEvent('mascot:showNear', { detail: { text: 'How can this get even better?', rect: { left: r.left, top: r.top, width: r.width, height: r.height } } })); } } } catch { } }}
                 onBlur={() => { try { if (formData.scopeOfImprovements && formData.scopeOfImprovements.trim().length > 0) { playSound('confirm'); speak('Great improvement idea — small steps make a difference.'); } } catch { } }}
-                className="bg-slate-700/50 border-blue-500/20 text-white"
+                className="tracker-form-input"
                 data-testid="input-scope-improvements"
               />
             </div>
           </div>
 
+          <hr className="tracker-form-divider" />
+
           <div className="space-y-2">
-            <Label htmlFor="description" className="text-blue-100">
+            <Label htmlFor="description" className="text-blue-100 tracker-form-label">
               Description <span className="text-blue-400/60 text-xs">(optional, max 35 words)</span>
             </Label>
             <Textarea
@@ -809,7 +870,7 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                   }
                 }
               }}
-              className="bg-slate-700/50 border-blue-500/20 text-white resize-none"
+              className="tracker-form-input resize-none"
               rows={3}
               data-testid="input-description"
             />
@@ -818,46 +879,48 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
             </p>
           </div>
 
+          <hr className="tracker-form-divider" />
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="startTime" className="text-blue-100">Start Time (IST) *</Label>
-              <div className="relative">
-                <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400" />
+              <Label htmlFor="startTime" className="text-blue-100 tracker-form-label">Start Time (IST) *</Label>
+              <div className="relative time-input-wrapper">
+                <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400 task-form-time-icon" />
                 <Input
                   id="startTime"
                   type="time"
                   value={formData.startTime}
                   onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
-                  className="pl-10 bg-slate-700/50 border-blue-500/20 text-white"
+                  className="pl-10 tracker-form-input"
                   data-testid="input-start-time"
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="endTime" className="text-blue-100">End Time (IST) *</Label>
-              <div className="relative">
-                <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400" />
+              <Label htmlFor="endTime" className="text-blue-100 tracker-form-label">End Time (IST) *</Label>
+              <div className="relative time-input-wrapper">
+                <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400 task-form-time-icon" />
                 <Input
                   id="endTime"
                   type="time"
                   value={formData.endTime}
                   onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
-                  className="pl-10 bg-slate-700/50 border-blue-500/20 text-white"
+                  className="pl-10 tracker-form-input"
                   data-testid="input-end-time"
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="percentage" className="text-blue-100">Completion %</Label>
+              <Label htmlFor="percentage" className="text-blue-100 tracker-form-label">Completion %</Label>
               <div className="flex items-center space-x-2">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => setFormData({ ...formData, percentageComplete: Math.max(0, formData.percentageComplete - 10) })}
-                  className="bg-slate-700/50 border-blue-500/20 text-white hover:bg-slate-600/50"
+                  className="bg-slate-700/50 border-blue-500/20 text-white hover:bg-slate-600/50 tracker-form-input"
                   data-testid="btn-decrease-percentage"
                 >
                   -
@@ -876,7 +939,7 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                       // window.dispatchEvent(new CustomEvent('mascot:doll', { detail: { text: "Hurray! 100%!", x: 50, y: 20 } }));
                     }
                   }}
-                  className="bg-slate-700/50 border-blue-500/20 text-white text-center"
+                  className="text-center tracker-form-input"
                   data-testid="input-percentage"
                 />
                 <Button
@@ -884,7 +947,7 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
                   variant="outline"
                   size="sm"
                   onClick={() => setFormData({ ...formData, percentageComplete: Math.min(100, formData.percentageComplete + 10) })}
-                  className="bg-slate-700/50 border-blue-500/20 text-white hover:bg-slate-600/50"
+                  className="bg-slate-700/50 border-blue-500/20 text-white hover:bg-slate-600/50 tracker-form-input"
                   data-testid="btn-increase-percentage"
                 >
                   +
@@ -893,9 +956,11 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
             </div>
           </div>
 
+          <hr className="tracker-form-divider" />
+
           <div className="space-y-2">
-            <Label className="text-blue-100">Tools Used</Label>
-            <Command className="bg-slate-700/30 border border-blue-500/10 rounded-md">
+            <Label className="text-blue-100 tracker-form-label">Tools Used</Label>
+            <Command className="bg-slate-700/30 border border-blue-500/10 rounded-md tracker-tools-command">
               <CommandInput
                 placeholder="Search tools..."
                 value={toolSearch}
@@ -943,12 +1008,14 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
             )}
           </div>
 
+          <hr className="tracker-form-divider" />
+
           <div className="flex justify-end gap-3 pt-4">
             <Button
               type="button"
               variant="outline"
               onClick={onCancel}
-              className="border-slate-600 text-slate-300"
+              className="border-slate-600 text-slate-300 tracker-btn-cancel"
               data-testid="button-cancel"
             >
               <X className="w-4 h-4 mr-2" />
@@ -956,7 +1023,7 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
             </Button>
             <Button
               type="submit"
-              className="bg-gradient-to-r from-blue-600 to-cyan-600"
+              className="bg-gradient-to-r from-blue-600 to-cyan-600 tracker-btn-save"
               data-testid="button-save-task"
             >
               <Save className="w-4 h-4 mr-2" />
@@ -970,38 +1037,38 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
           <DialogContent className="sm:max-w-[500px] bg-slate-900 border-slate-800 text-white p-6 shadow-2xl rounded-3xl">
             <DialogHeader className="mb-6">
               <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center border border-amber-500/20 mb-4">
-                 <AlertCircle className="w-6 h-6 text-amber-500" />
+                <AlertCircle className="w-6 h-6 text-amber-500" />
               </div>
               <DialogTitle className="text-2xl font-black">Add Task Deviation</DialogTitle>
               <DialogDescription className="text-slate-400 font-medium pt-1">
                 This task isn't in your initial plan. Adding it counts as a daily deviation.
               </DialogDescription>
             </DialogHeader>
-            
+
             <div className="space-y-6 py-2">
               <div className="space-y-3">
                 <Label className="text-slate-400 font-bold text-xs uppercase tracking-widest">Select Task from PMS *</Label>
-                <Select 
+                <Select
                   onValueChange={(v) => setSelectedDeviationTask(tasks.find(t => t.id === v))}
                 >
                   <SelectTrigger className="bg-slate-950 border-slate-800 h-14 rounded-2xl focus:ring-amber-500/30">
                     <SelectValue placeholder="Search tasks for deviation..." />
                   </SelectTrigger>
                   <SelectContent className="max-h-[250px] bg-slate-900 border-slate-800 text-white">
-                     {tasks.filter(t => !dailyPlan?.tasks.some((pt: any) => pt.taskId === t.id)).length > 0 ? (
-                        tasks.filter(t => !dailyPlan?.tasks.some((pt: any) => pt.taskId === t.id)).map(task => (
-                           <SelectItem key={task.id} value={task.id} className="hover:bg-slate-800 focus:bg-slate-800">{task.task_name}</SelectItem>
-                        ))
-                     ) : (
-                        <div className="p-4 text-center text-xs text-slate-500 italic">All available tasks are already in your plan</div>
-                     )}
+                    {tasks.filter(t => !dailyPlan?.tasks.some((pt: any) => pt.taskId === t.id)).length > 0 ? (
+                      tasks.filter(t => !dailyPlan?.tasks.some((pt: any) => pt.taskId === t.id)).map(task => (
+                        <SelectItem key={task.id} value={task.id} className="hover:bg-slate-800 focus:bg-slate-800">{task.task_name}</SelectItem>
+                      ))
+                    ) : (
+                      <div className="p-4 text-center text-xs text-slate-500 italic">All available tasks are already in your plan</div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
 
               <div className="space-y-3">
                 <Label className="text-slate-400 font-bold text-xs uppercase tracking-widest">Reason for Deviation *</Label>
-                <Textarea 
+                <Textarea
                   placeholder="Why are you adding this task today? (Mandatory)"
                   value={deviationReason}
                   onChange={(e) => setDeviationReason(e.target.value)}
@@ -1012,7 +1079,7 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
 
             <DialogFooter className="mt-8 flex gap-3">
               <Button variant="ghost" className="rounded-xl flex-1 h-12" onClick={() => setShowDeviationDialog(false)}>Cancel</Button>
-              <Button 
+              <Button
                 disabled={addDeviationMutation.isPending || !selectedDeviationTask || !deviationReason}
                 onClick={handleAddDeviation}
                 className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-black rounded-xl flex-[2] h-12 shadow-lg shadow-amber-900/20"

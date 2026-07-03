@@ -102,7 +102,7 @@ export default function GreetingAssistant({ userName }: GreetingAssistantProps) 
 
         // Show sometimes (e.g. 45% chance)
         const shouldShow = Math.random() < 0.45;
-        
+
         if (shouldShow) {
             const timer = setTimeout(() => {
                 setIsVisible(true);
@@ -147,7 +147,7 @@ export default function GreetingAssistant({ userName }: GreetingAssistantProps) 
             y: [0, 20, -30, 10, -5, 0],
             transition: { duration: 0.8, ease: "backOut" }
         });
-        try { playSound('select', 1); } catch {}
+        try { playSound('select', 1); } catch { }
     };
 
     const handleMouseMove = (e: React.MouseEvent) => {
@@ -183,12 +183,12 @@ export default function GreetingAssistant({ userName }: GreetingAssistantProps) 
                         style={{ rotateX, rotateY, transformStyle: "preserve-3d" }}
                     >
                         <motion.div animate={controls} className="relative group flex flex-col items-center">
-                            
+
                             {/* Speech Bubble (Appears below when assistant is in top area) */}
                             <motion.div
                                 initial={{ opacity: 0, y: -20, scale: 0.5 }}
                                 animate={{ opacity: 1, y: 40, scale: 1, transition: { delay: 0.15, type: "spring", stiffness: 140 } }}
-                                className="absolute top-24 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-2xl text-white p-5 rounded-3xl shadow-[0_25px_50px_rgba(0,0,0,0.5)] border border-white/10 min-w-[240px] z-[120]"
+                                className="absolute top-24 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-2xl text-white p-5 rounded-3xl shadow-[0_25px_50px_rgba(0,0,0,0.5)] border border-white/10 min-w-[240px] z-[120] greeting-card"
                                 style={{ translateZ: "120px" }}
                             >
                                 <div className="flex flex-col gap-2">
@@ -198,9 +198,9 @@ export default function GreetingAssistant({ userName }: GreetingAssistantProps) 
                                         <>
                                             <p className="text-xs font-medium uppercase text-blue-400/80 tracking-widest text-center">{greeting}</p>
                                             {quote && (
-                                                <motion.p 
-                                                    initial={{ opacity: 0 }} 
-                                                    animate={{ opacity: 1 }} 
+                                                <motion.p
+                                                    initial={{ opacity: 0 }}
+                                                    animate={{ opacity: 1 }}
                                                     transition={{ delay: 0.5 }}
                                                     className="text-sm text-center text-amber-300 font-extrabold leading-relaxed"
                                                 >
@@ -234,7 +234,7 @@ export default function GreetingAssistant({ userName }: GreetingAssistantProps) 
                                     src={mascotImage}
                                     alt="3D Mascot"
                                     animate={isDragging ? { rotateX: [0, -15, 15, 0], rotateY: [0, 15, -15, 0], scale: 1.15 } : {}}
-                                    className="w-32 h-32 md:w-44 md:h-44 object-contain brightness-110 contrast-110"
+                                    className="w-32 h-32 md:w-44 md:h-44 object-contain brightness-110 contrast-110 aria-robot-mascot"
                                     style={{ transform: "translateZ(60px)", filter: "drop-shadow(0 20px 30px rgba(0,0,0,0.5))" }}
                                 />
                             </motion.div>

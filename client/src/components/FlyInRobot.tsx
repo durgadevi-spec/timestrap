@@ -16,7 +16,7 @@ export default function FlyInRobot() {
 
   useEffect(() => {
     let t: any;
-  const handler = (e: any) => {
+    const handler = (e: any) => {
       const detail = e?.detail;
       if (!detail) return;
       const rect = detail.rect;
@@ -50,17 +50,17 @@ export default function FlyInRobot() {
         let attempts = 0;
         while (qi === last && attempts < 8) { qi = Math.floor(Math.random() * QUOTES.length); attempts++; }
       }
-      try { (window as any).__lastFlyInQuote = qi; } catch {}
+      try { (window as any).__lastFlyInQuote = qi; } catch { }
       const q = QUOTES[qi];
 
       // Position robot at the top-right of the page
-      const right = 60; 
-      const top = 60; 
+      const right = 60;
+      const top = 60;
 
       setPos({ right, top });
       setText(`${message} — ${q}`);
       setVisible(true);
-      try { playSound('confirm', 2); } catch {}
+      try { playSound('confirm', 2); } catch { }
 
       clearTimeout(t);
       t = setTimeout(() => setVisible(false), 3200);

@@ -35,6 +35,44 @@ console.log("[EMAIL CONFIG] Recipients:", NOTIFICATION_RECIPIENTS);
    HELPERS / TEMPLATES
 ============================ */
 
+function formatDateSafe(dVal: any): string {
+  if (!dVal) return '—';
+  try {
+    const d = new Date(dVal);
+    return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-IN');
+  } catch {
+    return '—';
+  }
+}
+
+/**
+ * Format a value for the Timeline column in email templates.
+ * - HH:MM time strings (e.g. "14:20") → "2:20 pm"
+ * - null/undefined/empty → "—"
+ * - Calendar date strings (e.g. "2026-06-19") → "19/6/2026" (last-resort fallback)
+ */
+function formatTimelineSafe(val: any): string {
+  if (!val) return '—';
+  if (typeof val === 'string') {
+    // HH:MM or HH:MM:SS — format as 12-hour time
+    const timeMatch = val.trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    if (timeMatch) {
+      let hours = parseInt(timeMatch[1], 10);
+      const minutes = timeMatch[2];
+      const ampm = hours >= 12 ? 'pm' : 'am';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+      return `${hours}:${minutes} ${ampm}`;
+    }
+    // ISO datetime or calendar date — display as local date only (last resort)
+    try {
+      const d = new Date(val);
+      if (!isNaN(d.getTime())) return d.toLocaleDateString('en-IN');
+    } catch { /* ignore */ }
+  }
+  return '—';
+}
+
 function generateTaskTable(tasks: any[]) {
   return `
     <table style="width:100%; border-collapse: collapse; margin-top: 20px; font-size: 13px;">
@@ -50,8 +88,8 @@ function generateTaskTable(tasks: any[]) {
         ${tasks.map(task => {
           const progress = task.percentageComplete !== undefined ? `${task.percentageComplete}%` : '—';
           const progressColor = task.percentageComplete === 100 ? '#16a34a' : (task.percentageComplete || 0) > 0 ? '#2563eb' : '#64748b';
-          const startDate = task.pmsStartDate ? new Date(task.pmsStartDate).toLocaleDateString('en-IN') : '—';
-          const endDate = task.pmsEndDate ? new Date(task.pmsEndDate).toLocaleDateString('en-IN') : '—';
+          const startDate = formatTimelineSafe(task.startTime || task.start_time);
+          const endDate = formatTimelineSafe(task.endTime || task.end_time);
           
           return `
           <tr style="border-bottom: 1px solid #e2e8f0;">
@@ -296,8 +334,7 @@ export async function sendTimesheetSummaryEmail(data: {
     const { employeeName, employeeCode, date, totalHours, taskHours, lmsHours, tasks } = data;
     const taskTable = generateTaskTable(tasks);
 
-    const { data: result, error } = await resend.emails.send({
-      from: FROM_EMAIL,
+    const result = await sendEmail({
       to: NOTIFICATION_RECIPIENTS,
       subject: `Timesheet Submission Summary - ${employeeName} (${employeeCode}) - ${date}`,
       html: `
@@ -321,16 +358,10 @@ export async function sendTimesheetSummaryEmail(data: {
       </div>
       `
     });
-
-    if (error) {
-      console.error("[SUMMARY EMAIL ERROR]", error);
-      return { success: false, error };
-    }
-    console.log("[SUMMARY EMAIL] sent:", result?.id);
-    return { success: true, result };
+    return result;
   } catch (err) {
     console.error("[SUMMARY EMAIL ERROR]", err);
-    return { success: false, err };
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -382,22 +413,15 @@ export async function sendApprovalSummaryEmail(data: {
       </div>
     `;
 
-    const { data: result, error } = await resend.emails.send({
-      from: FROM_EMAIL,
+    const result = await sendEmail({
       to: recipients || NOTIFICATION_RECIPIENTS,
       subject: `Timesheet ${statusText} - ${employeeName} (${employeeCode}) - ${date}`,
       html
     });
-
-    if (error) {
-      console.error("[APPROVAL SUMMARY EMAIL ERROR]", error);
-      return { success: false, error };
-    }
-    console.log("[APPROVAL SUMMARY EMAIL] sent:", result?.id);
-    return { success: true, result };
+    return result;
   } catch (err) {
     console.error("[APPROVAL SUMMARY EMAIL ERROR]", err);
-    return { success: false, err };
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -598,7 +622,7 @@ export async function sendSiteReportEmail(data: {
     return { success: true, result };
   } catch (err) {
     console.error("[SITE REPORT EMAIL ERROR]", err);
-    return { success: false, err };
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -785,7 +809,7 @@ export async function sendDeviationNotificationEmail(data: {
 export async function sendDailyPlanSubmittedEmail(data: {
   employeeName: string;
   employeeCode: string;
-  selectedTasks: { task_name: string; projectName?: string; start_date?: string; end_date?: string; progress?: number; isOverdue?: boolean }[];
+  selectedTasks: { task_name: string; projectName?: string; start_date?: string; end_date?: string; startTime?: string; endTime?: string; start_time?: string; end_time?: string; scheduleData?: any; progress?: number; isOverdue?: boolean }[];
   unselectedTasks: { taskName: string; reason: string; newDueDate: string; start_date?: string; end_date?: string; progress?: number; isOverdue?: boolean }[];
 }) {
   const { employeeName, employeeCode, selectedTasks, unselectedTasks } = data;
@@ -802,27 +826,27 @@ export async function sendDailyPlanSubmittedEmail(data: {
     const progressColor = t.progress === 100 ? '#16a34a' : t.progress && t.progress > 0 ? '#2563eb' : '#64748b';
     
     if (isUnselected) {
+      // Deferred tasks: no Timeline column — timeslots are irrelevant for postponed tasks
       return `
       <tr>
         <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-weight:500;">${t.taskName}</td>
         <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-style:italic;color:#64748b;">${t.reason}</td>
         <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-weight:bold;color:${progressColor};text-align:center;">${progress}</td>
-        <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;white-space:nowrap;font-size:12px;text-align:center;">
-          <div><span style="color:#94a3b8">Start:</span> ${t.start_date ? new Date(t.start_date).toLocaleDateString('en-IN') : '—'}</div>
-          <div><span style="color:#94a3b8">End:</span> ${t.end_date ? new Date(t.end_date).toLocaleDateString('en-IN') : '—'}</div>
-        </td>
         <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:bold;color:#d97706;">${new Date(t.newDueDate).toLocaleDateString('en-IN')}</td>
       </tr>`;
     }
 
+    // Selected tasks: show the actual scheduled time from scheduleData (set by user in plan UI)
+    const taskStart = formatTimelineSafe(t.startTime || t.scheduleData?.startTime || t.start_time);
+    const taskEnd   = formatTimelineSafe(t.endTime   || t.scheduleData?.endTime   || t.end_time);
     return `
     <tr>
       <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-weight:500;">${t.task_name}</td>
       <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;color:#475569;">${t.projectName || '—'}</td>
       <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-weight:bold;color:${progressColor};text-align:center;">${progress}</td>
       <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;white-space:nowrap;font-size:12px;text-align:center;">
-        <div><span style="color:#94a3b8">Start:</span> ${t.start_date ? new Date(t.start_date).toLocaleDateString('en-IN') : '—'}</div>
-        <div><span style="color:#94a3b8">End:</span> ${t.end_date ? new Date(t.end_date).toLocaleDateString('en-IN') : '—'}</div>
+        <div><span style="color:#94a3b8">Start:</span> ${taskStart}</div>
+        <div><span style="color:#94a3b8">End:</span> ${taskEnd}</div>
       </td>
     </tr>`;
   };
@@ -842,7 +866,7 @@ export async function sendDailyPlanSubmittedEmail(data: {
                 ? '<th style="padding:12px 8px;text-align:left;color:#475569;font-weight:600;">Reason</th>'
                 : '<th style="padding:12px 8px;text-align:left;color:#475569;font-weight:600;">Project</th>'}
               <th style="padding:12px 8px;text-align:center;color:#475569;font-weight:600;">Progress</th>
-              <th style="padding:12px 8px;text-align:center;color:#475569;font-weight:600;">Timeline</th>
+              ${isUnselected ? '' : '<th style="padding:12px 8px;text-align:center;color:#475569;font-weight:600;">Timeline</th>'}
               ${isUnselected ? '<th style="padding:12px 8px;text-align:center;color:#475569;font-weight:600;">Next Target</th>' : ''}
             </tr>
           </thead>
@@ -1385,7 +1409,7 @@ export async function sendDailyPlanConfirmationEmail(data: {
   employeeCode: string;
   employeeEmail: string;
   date: string;
-  selectedTasks: { task_name: string; projectName?: string; start_date?: string; end_date?: string; progress?: number; isOverdue?: boolean }[];
+  selectedTasks: { task_name: string; projectName?: string; start_date?: string; end_date?: string; startTime?: string; endTime?: string; start_time?: string; end_time?: string; scheduleData?: any; progress?: number; isOverdue?: boolean }[];
   unselectedTasks: { taskName: string; reason: string; newDueDate: string; start_date?: string; end_date?: string; progress?: number; isOverdue?: boolean }[];
 }) {
   const { employeeName, employeeCode, employeeEmail, date, selectedTasks, unselectedTasks } = data;
@@ -1399,7 +1423,11 @@ export async function sendDailyPlanConfirmationEmail(data: {
     </div> <span style="color:${color};font-weight:700;font-size:12px;">${pct}%</span>`;
   };
 
-  const selectedRows = selectedTasks.map(t => `
+  const selectedRows = selectedTasks.map(t => {
+    // Read actual scheduled times from scheduleData (set by user), fall back to bare startTime/endTime
+    const tStart = formatTimelineSafe(t.startTime || t.scheduleData?.startTime || t.start_time);
+    const tEnd   = formatTimelineSafe(t.endTime   || t.scheduleData?.endTime   || t.end_time);
+    return `
     <tr style="${t.isOverdue ? 'background:#fff7ed;' : ''}">
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;">
         ${t.isOverdue ? '<span style="color:#ef4444;font-size:11px;font-weight:bold;">⚠ OVERDUE </span>' : ''}
@@ -1407,12 +1435,14 @@ export async function sendDailyPlanConfirmationEmail(data: {
       </td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;color:#475569;font-size:13px;">${t.projectName || '—'}</td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;white-space:nowrap;font-size:12px;">
-        <div><span style="color:#94a3b8;">Start:</span> ${formatDate(t.start_date)}</div>
-        <div><span style="color:#94a3b8;">End:</span> ${formatDate(t.end_date)}</div>
+        <div><span style="color:#94a3b8;">Start:</span> ${tStart}</div>
+        <div><span style="color:#94a3b8;">End:</span> ${tEnd}</div>
       </td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;text-align:center;">${progressBar(t.progress || 0)}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
+  // Deferred tasks: Timeline column removed — timeslots are irrelevant for postponed tasks
   const unselectedRows = unselectedTasks.map(t => `
     <tr style="${t.isOverdue ? 'background:#fff7ed;' : ''}">
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;">
@@ -1420,10 +1450,6 @@ export async function sendDailyPlanConfirmationEmail(data: {
         <strong>${t.taskName}</strong>
       </td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;font-style:italic;color:#64748b;font-size:13px;">${t.reason}</td>
-      <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;white-space:nowrap;font-size:12px;">
-        <div><span style="color:#94a3b8;">Start:</span> ${formatDate(t.start_date)}</div>
-        <div><span style="color:#94a3b8;">End:</span> ${formatDate(t.end_date)}</div>
-      </td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;text-align:center;">${progressBar(t.progress || 0)}</td>
       <td style="padding:10px 10px;border-bottom:1px solid #e2e8f0;color:#d97706;font-weight:bold;font-size:12px;">${formatDate(t.newDueDate)}</td>
     </tr>`).join('');
@@ -1472,7 +1498,6 @@ export async function sendDailyPlanConfirmationEmail(data: {
             <tr style="background:#78350f;color:#fff;">
               <th style="padding:10px;text-align:left;">Task</th>
               <th style="padding:10px;text-align:left;">Reason</th>
-              <th style="padding:10px;text-align:center;">Timeline</th>
               <th style="padding:10px;text-align:center;">Progress</th>
               <th style="padding:10px;text-align:center;">Next Target</th>
             </tr>

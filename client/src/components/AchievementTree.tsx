@@ -28,9 +28,7 @@ function rng(seed: number) {
 
 /* ══════════════════════════════════════════════════════
    NATURAL TREE BRANCH SYSTEM
-   Like the image: thick trunk, wide-spreading arms,
-   progressively thinning branches filling the canopy
-════════════════════════════════════════════════════════ */
+══════════════════════════════════════════════════════ */
 function buildTree(cx: number, baseY: number, levels = 5, decayStatus = 'active') {
   const branches: any[] = [];
   let id = 0;
@@ -39,12 +37,10 @@ function buildTree(cx: number, baseY: number, levels = 5, decayStatus = 'active'
     if (lv > levels || len < 4 || thick < 0.6) return;
     const rad = (angle * Math.PI) / 180;
 
-    // Add droop if decaying
     let currentAngle = angle;
     if (decayStatus === 'dying' && lv > 1) currentAngle -= 15;
     if (decayStatus === 'wilting' && lv > 2) currentAngle -= 8;
 
-    // Natural organic curve
     const bendAmt = (rng(id * 7 + 1) - 0.5) * len * 0.22;
     const cpx = x1 + Math.cos(rad) * len * 0.5 + Math.cos(rad + Math.PI / 2) * bendAmt;
     const cpy = y1 - Math.sin(rad) * len * 0.5 + Math.sin(rad + Math.PI / 2) * bendAmt;
@@ -63,9 +59,7 @@ function buildTree(cx: number, baseY: number, levels = 5, decayStatus = 'active'
       grow(x2, y2, currentAngle + (rng(myId * 23) - 0.5) * 16, len * lm * 0.66, thick * 0.55, lv + 2);
   }
 
-  // ── MAIN TRUNK
   grow(cx, baseY, 88, 100, 28, 1);
-  // ── PRIMARY ARMS
   grow(cx - 4, baseY - 80, 125, 72, 19, 1);
   grow(cx + 4, baseY - 75, 55, 70, 18, 1);
   return branches;
@@ -75,11 +69,9 @@ function getTips(branches: any[], minLv: number) {
   return branches.filter(b => b.lv >= minLv).map(b => ({ x: b.x2, y: b.y2, id: b.id }));
 }
 
-/* ══ SHARED DEFS ══ */
 function Defs() {
   return (
     <defs>
-      {/* Sky */}
       <linearGradient id="dSky" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stopColor="#9ecfff" />
         <stop offset="45%" stopColor="#cce8ff" />
@@ -97,24 +89,20 @@ function Defs() {
         <stop offset="0%" stopColor="#78350f" />
         <stop offset="100%" stopColor="#451a03" />
       </linearGradient>
-      {/* Blossom sky */}
       <linearGradient id="dBlossomSky" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stopColor="#b0d8ff" />
         <stop offset="50%" stopColor="#dbeeff" />
         <stop offset="100%" stopColor="#edfff8" />
       </linearGradient>
-      {/* Ground */}
       <radialGradient id="dGround" cx="50%" cy="20%">
         <stop offset="0%" stopColor="#8ae058" />
         <stop offset="55%" stopColor="#4db825" />
         <stop offset="100%" stopColor="#267010" />
       </radialGradient>
-      {/* Soil */}
       <radialGradient id="dSoil" cx="45%" cy="35%">
         <stop offset="0%" stopColor="#c08848" />
         <stop offset="100%" stopColor="#5a2e0c" />
       </radialGradient>
-      {/* Bark — 6-stop realistic */}
       <linearGradient id="dBark" x1="0" y1="0" x2="1" y2="0">
         <stop offset="0%" stopColor="#180800" />
         <stop offset="14%" stopColor="#4a1e08" />
@@ -128,13 +116,11 @@ function Defs() {
         <stop offset="42%" stopColor="rgba(200,135,75,0.30)" />
         <stop offset="100%" stopColor="rgba(200,135,75,0)" />
       </linearGradient>
-      {/* Root */}
       <linearGradient id="dRoot" x1="0" y1="0" x2="1" y2="0">
         <stop offset="0%" stopColor="#2a1004" />
         <stop offset="50%" stopColor="#6a3a14" />
         <stop offset="100%" stopColor="#2a1004" />
       </linearGradient>
-      {/* Petals — 3 shades of cherry pink */}
       <radialGradient id="pA" cx="35%" cy="28%">
         <stop offset="0%" stopColor="#fff0f5" />
         <stop offset="35%" stopColor="#ffc8e0" />
@@ -153,12 +139,10 @@ function Defs() {
         <stop offset="75%" stopColor="#ffc8e0" />
         <stop offset="100%" stopColor="#ffaad0" />
       </radialGradient>
-      {/* Leaf */}
       <linearGradient id="dLeaf" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0%" stopColor="#72e038" />
         <stop offset="100%" stopColor="#206808" />
       </linearGradient>
-      {/* Fruits */}
       <radialGradient id="fRed" cx="30%" cy="26%">
         <stop offset="0%" stopColor="#ff9898" />
         <stop offset="42%" stopColor="#dd1818" />
@@ -174,21 +158,34 @@ function Defs() {
         <stop offset="42%" stopColor="#96183c" />
         <stop offset="100%" stopColor="#4e0818" />
       </radialGradient>
-      {/* Pink canopy glow */}
       <radialGradient id="dPinkGlow" cx="50%" cy="48%">
         <stop offset="0%" stopColor="#ffc0e0" stopOpacity="0.22" />
         <stop offset="100%" stopColor="#ffc0e0" stopOpacity="0" />
+      </radialGradient>
+      {/* Key-step fruit gradients (NEW) */}
+      <radialGradient id="fKeyGreen" cx="30%" cy="26%">
+        <stop offset="0%" stopColor="#bbf7d0" />
+        <stop offset="42%" stopColor="#22c55e" />
+        <stop offset="100%" stopColor="#14532d" />
+      </radialGradient>
+      <radialGradient id="fKeyYellow" cx="30%" cy="26%">
+        <stop offset="0%" stopColor="#fef3c7" />
+        <stop offset="42%" stopColor="#f59e0b" />
+        <stop offset="100%" stopColor="#78350f" />
+      </radialGradient>
+      <radialGradient id="fKeyRed" cx="30%" cy="26%">
+        <stop offset="0%" stopColor="#fecaca" />
+        <stop offset="42%" stopColor="#dc2626" />
+        <stop offset="100%" stopColor="#7f1d1d" />
       </radialGradient>
     </defs>
   );
 }
 
-/* ══ SCENE BG ══ */
 function Sky({ w, h, bloom = false, skyId = 'dSky' }: { w: number, h: number, bloom?: boolean, skyId?: string }) {
   return (
     <>
       <rect width={w} height={h} fill={bloom ? "url(#dBlossomSky)" : `url(#${skyId})`} rx="14" />
-      {/* Sun */}
       <circle cx={w - 62} cy={48} r={26} fill="#fff8a0" opacity="0.88" />
       <circle cx={w - 62} cy={48} r={18} fill="#ffe828" />
       {[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].map((a, i) => {
@@ -198,7 +195,6 @@ function Sky({ w, h, bloom = false, skyId = 'dSky' }: { w: number, h: number, bl
           x2={(w - 62) + Math.cos(r) * 35} y2={48 + Math.sin(r) * 35}
           stroke="#ffe020" strokeWidth="1.8" opacity="0.60" />;
       })}
-      {/* Clouds */}
       {[[70, 50, 1.1], [138, 40, 0.86], [48, 66, 0.70], [w - 158, 56, 1.0], [w - 105, 44, 0.80]].map(([cx, cy, s], i) => (
         <g key={i} opacity={0.88}>
           <ellipse cx={cx} cy={cy} rx={46 * s} ry={17 * s} fill="white" />
@@ -217,7 +213,6 @@ function Ground({ w, h, cx }: { w: number, h: number, cx: number }) {
       <ellipse cx={cx} cy={h - 12} rx={w * 0.44} ry={26} fill="#58c030" opacity="0.40" />
       <ellipse cx={cx} cy={h - 26} rx={70} ry={20} fill="url(#dSoil)" />
       <ellipse cx={cx} cy={h - 22} rx={56} ry={12} fill="#7a4820" opacity="0.30" />
-      {/* Grass blades */}
       {Array.from({ length: 36 }, (_, i) => {
         const gx = cx - 175 + i * 10 + rng(i * 3) * 7;
         const gy = h - 28;
@@ -230,7 +225,6 @@ function Ground({ w, h, cx }: { w: number, h: number, cx: number }) {
   );
 }
 
-/* ══ BRANCHES ══ */
 function Branches({ branches }: { branches: any[] }) {
   return (
     <g>
@@ -250,8 +244,7 @@ function Branches({ branches }: { branches: any[] }) {
   );
 }
 
-/* ══ SURFACE ROOTS ══ */
-function SurfaceRoots({ cx, y }: { cx: number, y: number }) {
+function SurfaceRoots({ cx, y }: { cx: number; y: number }) {
   return (
     <g>
       {[-1, 1].map((d, i) => (
@@ -263,8 +256,7 @@ function SurfaceRoots({ cx, y }: { cx: number, y: number }) {
   );
 }
 
-/* ══ LEAF CLUSTER (for non-flowering stages) ══ */
-function LeafCluster({ x, y, sz = 14, decayStatus = 'active' }: { x: number, y: number, sz?: number, decayStatus?: string }) {
+function LeafCluster({ x, y, sz = 14, decayStatus = 'active' }: { x: number; y: number; sz?: number; decayStatus?: string }) {
   const leafFill = (i: number) => {
     if (decayStatus === 'dying') return 'url(#dLeafDying)';
     if (decayStatus === 'wilting') return 'url(#dLeafWilting)';
@@ -291,15 +283,7 @@ function LeafCluster({ x, y, sz = 14, decayStatus = 'active' }: { x: number, y: 
   );
 }
 
-/* ══════════════════════════════════════════════════════
-   REAL CHERRY BLOSSOM FLOWER
-   - 5 broad heart-shaped petals with notched tips
-   - Deep-pink veins radiating through each petal  
-   - Bright yellow-green centre with fine stamens
-   - White inner glow at petal base
-══════════════════════════════════════════════════════ */
-function CherryFlower({ x, y, sz, delay, shade, rot = 0, decayStatus = 'active' }: { x: number, y: number, sz: number, delay: number, shade: number, rot?: number, decayStatus?: string }) {
-  // shade 0 = deep pink, 1 = mid pink, 2 = pale pink
+function CherryFlower({ x, y, sz, delay, shade, rot = 0, decayStatus = 'active' }: { x: number; y: number; sz: number; delay: number; shade: number; rot?: number; decayStatus?: string }) {
   let outerCol = ["#f06090", "#f585a8", "#f9a8c4"][shade];
   let midCol = ["#f8b0cc", "#fac8da", "#fcdde8"][shade];
   let innerCol = ["#fff0f5", "#fff5f8", "#fff8fa"][shade];
@@ -322,37 +306,30 @@ function CherryFlower({ x, y, sz, delay, shade, rot = 0, decayStatus = 'active' 
       animation: `flSway ${2.6 + delay}s ease-in-out ${delay}s infinite alternate`,
       transformOrigin: `${x}px ${y}px`,
     }}>
-      {/* ── 5 petals ── */}
       {[0, 72, 144, 216, 288].map((baseA, pi) => {
         const a = baseA + rot;
         const rad = (a * Math.PI) / 180;
         const px = x + Math.cos(rad) * sz * 0.78;
         const py = y + Math.sin(rad) * sz * 0.78;
 
-        // Petal: broad ellipse, rotated outward
         return (
           <g key={pi}>
-            {/* Outer petal body */}
             <ellipse cx={px} cy={py}
               rx={sz * 0.85} ry={sz * 0.58}
               transform={`rotate(${a + 90},${px},${py})`}
               fill={outerCol} opacity="0.96" />
-            {/* Mid gradient lighter zone */}
             <ellipse cx={px - Math.cos(rad) * sz * 0.12} cy={py - Math.sin(rad) * sz * 0.12}
               rx={sz * 0.62} ry={sz * 0.40}
               transform={`rotate(${a + 90},${px - Math.cos(rad) * sz * 0.12},${py - Math.sin(rad) * sz * 0.12})`}
               fill={midCol} opacity="0.80" />
-            {/* Inner white glow near base */}
             <ellipse cx={x + Math.cos(rad) * sz * 0.22} cy={y + Math.sin(rad) * sz * 0.22}
               rx={sz * 0.30} ry={sz * 0.20}
               transform={`rotate(${a + 90},${x + Math.cos(rad) * sz * 0.22},${y + Math.sin(rad) * sz * 0.22})`}
               fill={innerCol} opacity="0.70" />
-            {/* Vein line */}
             <line
               x1={x + Math.cos(rad) * sz * 0.16} y1={y + Math.sin(rad) * sz * 0.16}
               x2={x + Math.cos(rad) * sz * 1.48} y2={y + Math.sin(rad) * sz * 1.48}
               stroke={veinCol} strokeWidth={sz * 0.055} strokeLinecap="round" opacity="0.38" />
-            {/* Two side veins */}
             {[-22, 22].map((dv, vi) => {
               const vr = ((a + dv) * Math.PI) / 180;
               return <line key={vi}
@@ -361,19 +338,15 @@ function CherryFlower({ x, y, sz, delay, shade, rot = 0, decayStatus = 'active' 
                 y2={y + Math.sin(rad) * sz * 0.28 + Math.sin(vr) * sz * 0.58}
                 stroke={veinCol} strokeWidth={sz * 0.04} strokeLinecap="round" opacity="0.24" />;
             })}
-            {/* Notch at petal tip */}
             <circle cx={x + Math.cos(rad) * sz * 1.55} cy={y + Math.sin(rad) * sz * 1.55}
               r={sz * 0.10} fill={outerCol} opacity="0.60" />
           </g>
         );
       })}
 
-      {/* ── Centre ── */}
-      {/* Green-yellow centre disk */}
       <circle cx={x} cy={y} r={sz * 0.34} fill="#aadd30" opacity="0.90" />
       <circle cx={x} cy={y} r={sz * 0.22} fill="#ccee60" opacity="0.95" />
       <circle cx={x} cy={y} r={sz * 0.12} fill="#eeff88" />
-      {/* Fine stamens */}
       {[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].map((a, si) => {
         const rad = (a * Math.PI) / 180;
         const r1 = sz * 0.22, r2 = sz * 0.48;
@@ -392,8 +365,7 @@ function CherryFlower({ x, y, sz, delay, shade, rot = 0, decayStatus = 'active' 
   );
 }
 
-/* ══ SMALL LEAF SPRIG (peeks out between flowers) ══ */
-function LeafSprig({ x, y, sz, rot = 0, decayStatus = 'active' }: { x: number, y: number, sz: number, rot?: number, decayStatus?: string }) {
+function LeafSprig({ x, y, sz, rot = 0, decayStatus = 'active' }: { x: number; y: number; sz: number; rot?: number; decayStatus?: string }) {
   const r = (rot * Math.PI) / 180;
   const leafFill = (i: number) => {
     if (decayStatus === 'dying') return "#4a2a1a";
@@ -423,8 +395,7 @@ function LeafSprig({ x, y, sz, rot = 0, decayStatus = 'active' }: { x: number, y
   );
 }
 
-/* ══ FRUIT ══ */
-function Fruit({ x, y, r, delay, v, decayStatus = 'active' }: { x: number, y: number, r: number, delay: number, v: number, decayStatus?: string }) {
+function Fruit({ x, y, r, delay, v, decayStatus = 'active' }: { x: number; y: number; r: number; delay: number; v: number; decayStatus?: string }) {
   const gId = decayStatus === 'dying' ? 'dLeafDying' : decayStatus === 'wilting' ? 'dLeafWilting' : ["fRed", "fGold", "fDark"][v % 3];
   return (
     <g style={{ animation: `frBob ${2.2 + delay}s ease-in-out ${delay}s infinite alternate` }}>
@@ -441,7 +412,96 @@ function Fruit({ x, y, r, delay, v, decayStatus = 'active' }: { x: number, y: nu
   );
 }
 
-/* ══ CONFETTI ══ */
+/* ══ KEY-STEP FRUIT (NEW) ══
+   Renders a fruit on the tree that represents a project Key Step.
+   - status: 'completed' → green with green check overlay
+   - status: 'pending'   → yellow/orange
+   - status: 'overdue'   → red with optional warning emoji
+*/
+export interface KeyStepFruitData {
+  id: string;
+  name: string;
+  status: 'completed' | 'pending' | 'overdue';
+}
+
+function KeyStepFruit({ x, y, r, delay, status, decayStatus = 'active' }: { x: number; y: number; r: number; delay: number; status: 'completed' | 'pending' | 'overdue'; decayStatus?: string }) {
+  const gId =
+    status === 'completed' ? 'fKeyGreen'
+    : status === 'overdue' ? 'fKeyRed'
+    : 'fKeyYellow';
+
+  const ringColor =
+    status === 'completed' ? '#22c55e'
+    : status === 'overdue' ? '#dc2626'
+    : '#f59e0b';
+
+  return (
+    <g style={{ animation: `frBob ${2.0 + delay}s ease-in-out ${delay}s infinite alternate` }}>
+      {/* Shadow */}
+      <ellipse cx={x} cy={y + r * 1.12} rx={r * 0.65} ry={r * 0.16} fill="rgba(0,0,0,0.16)" />
+      {/* Fruit body */}
+      <circle cx={x} cy={y} r={r} fill={`url(#${gId})`} stroke={ringColor} strokeWidth="1.5" />
+      {/* Highlight */}
+      <ellipse cx={x - r * .28} cy={y - r * .26} rx={r * .32} ry={r * .22}
+        fill="white" opacity="0.45" transform={`rotate(-25,${x - r * .28},${y - r * .26})`} />
+      {/* Stem */}
+      <path d={`M${x + 1},${y - r} Q${x + r * .5},${y - r * 1.6} ${x + r * .2},${y - r * 1.9}`}
+        stroke="#3a2006" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+      {/* Leaf */}
+      <ellipse cx={x + r * .44} cy={y - r * 1.54} rx={r * .42} ry={r * .20}
+        transform={`rotate(-38,${x + r * .44},${y - r * 1.54})`} fill="#2e9810" opacity="0.85" />
+      {/* Status indicator inside the fruit */}
+      {status === 'completed' && (
+        <g>
+          <path
+            d={`M${x - r * 0.35},${y} L${x - r * 0.05},${y + r * 0.30} L${x + r * 0.40},${y - r * 0.30}`}
+            stroke="white"
+            strokeWidth={Math.max(1.4, r * 0.18)}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+          />
+        </g>
+      )}
+      {status === 'pending' && (
+        <g>
+          <circle cx={x} cy={y} r={r * 0.22} fill="white" opacity="0.95" />
+        </g>
+      )}
+      {status === 'overdue' && (
+        <g>
+          {/* Warning triangle inside */}
+          <path
+            d={`M${x},${y - r * 0.30} L${x + r * 0.32},${y + r * 0.22} L${x - r * 0.32},${y + r * 0.22} Z`}
+            fill="white"
+            opacity="0.95"
+          />
+          <text
+            x={x}
+            y={y + r * 0.18}
+            textAnchor="middle"
+            fontSize={r * 0.5}
+            fontWeight="900"
+            fill="#dc2626"
+          >!</text>
+          {/* Warning emoji outside the fruit */}
+          <text
+            x={x + r * 0.55}
+            y={y - r * 0.55}
+            fontSize={r * 0.8}
+            aria-hidden
+          >⚠️</text>
+          <text
+            x={x - r * 0.55}
+            y={y - r * 0.55}
+            fontSize={r * 0.7}
+            aria-hidden
+          >😟</text>
+        </g>
+      )}
+    </g>
+  );
+}
 function Confetti({ active }: { active: boolean }) {
   const pieces = React.useRef(
     Array.from({ length: 55 }, (_, i) => ({
@@ -470,7 +530,6 @@ function Confetti({ active }: { active: boolean }) {
   );
 }
 
-/* ══ FALLING PETALS ══ */
 function FallingPetals({ active }: { active: boolean }) {
   const petals = React.useRef(
     Array.from({ length: 24 }, (_, i) => ({
@@ -500,8 +559,9 @@ function FallingPetals({ active }: { active: boolean }) {
 
 /* ══════════════════════════════════════════════════════
    STAGE TREES
+   - keySteps is a NEW prop: array of key step fruits to overlay.
 ══════════════════════════════════════════════════════ */
-function SeedTree() {
+function SeedTree({ keySteps = [] }: { keySteps?: KeyStepFruitData[] }) {
   return (
     <svg viewBox="0 0 560 430" style={{ width: "100%", height: "100%" }}>
       <Defs /><Sky w={560} h={430} /><Ground w={560} h={430} cx={280} />
@@ -510,11 +570,16 @@ function SeedTree() {
       <ellipse cx="278" cy="358" rx="7" ry="5" fill="#cc9848" opacity="0.5" />
       <path d="M280,355 Q287,342 283,332" stroke="#4a8018" strokeWidth="3.5" strokeLinecap="round" fill="none" />
       <path d="M283,339 Q293,333 299,337" stroke="#3a6a10" strokeWidth="2" strokeLinecap="round" fill="none" />
+      {keySteps.slice(0, 1).map((ks, i) => (
+        <g key={`ks${i}`}>
+          <KeyStepFruit x={280 + (i % 2 === 0 ? -8 : 8)} y={340} r={4} delay={i * 0.4} status={ks.status} />
+        </g>
+      ))}
     </svg>
   );
 }
 
-function SproutTree() {
+function SproutTree({ keySteps = [] }: { keySteps?: KeyStepFruitData[] }) {
   return (
     <svg viewBox="0 0 560 430" style={{ width: "100%", height: "100%" }}>
       <Defs /><Sky w={560} h={430} /><Ground w={560} h={430} cx={280} />
@@ -523,11 +588,16 @@ function SproutTree() {
       <path d="M280,344 Q250,320 238,329 Q248,350 280,344Z" fill="#48901a" />
       <path d="M280,322 Q308,298 322,308 Q310,328 280,322Z" fill="#5aaa22" />
       <ellipse cx="280" cy="296" rx="8" ry="10" fill="#72cc2e" />
+      {keySteps.slice(0, 2).map((ks, i) => (
+        <g key={`ks${i}`}>
+          <KeyStepFruit x={280 + (i % 2 === 0 ? -14 : 14)} y={300 + (i * 4)} r={4} delay={i * 0.4} status={ks.status} />
+        </g>
+      ))}
     </svg>
   );
 }
 
-function SaplingTree({ decayStatus = 'active' }) {
+function SaplingTree({ decayStatus = 'active', keySteps = [] }: { decayStatus?: string; keySteps?: KeyStepFruitData[] }) {
   const cx = 280, baseY = 378;
   const branches = React.useMemo(() => buildTree(cx, baseY, 3, decayStatus), [decayStatus]);
   const tips = getTips(branches, 3);
@@ -536,11 +606,15 @@ function SaplingTree({ decayStatus = 'active' }) {
       <Defs /><Sky w={560} h={430} skyId={decayStatus !== 'active' ? 'dWiltingSky' : 'dSky'} /><Ground w={560} h={430} cx={cx} />
       <Branches branches={branches} />
       {tips.map((t, i) => <LeafCluster key={i} x={t.x} y={t.y} sz={13 + rng(i * 3) * 6} decayStatus={decayStatus} />)}
+      {keySteps.slice(0, 3).map((ks, i) => {
+        const t = tips[i % Math.max(1, tips.length)] || { x: cx, y: baseY - 50 };
+        return <KeyStepFruit key={`ks${i}`} x={t.x} y={t.y + 4} r={4.5} delay={i * 0.4} status={ks.status} />;
+      })}
     </svg>
   );
 }
 
-function YoungTree({ decayStatus = 'active' }) {
+function YoungTree({ decayStatus = 'active', keySteps = [] }: { decayStatus?: string; keySteps?: KeyStepFruitData[] }) {
   const cx = 280, baseY = 378;
   const branches = React.useMemo(() => buildTree(cx, baseY, 4, decayStatus), [decayStatus]);
   const tips = getTips(branches, 3);
@@ -550,11 +624,15 @@ function YoungTree({ decayStatus = 'active' }) {
       <SurfaceRoots cx={cx} y={baseY} />
       <Branches branches={branches} />
       {tips.map((t, i) => <LeafCluster key={i} x={t.x} y={t.y} sz={17 + rng(i * 5) * 9} decayStatus={decayStatus} />)}
+      {keySteps.slice(0, 4).map((ks, i) => {
+        const t = tips[i % Math.max(1, tips.length)] || { x: cx, y: baseY - 60 };
+        return <KeyStepFruit key={`ks${i}`} x={t.x} y={t.y + 4} r={5} delay={i * 0.4} status={ks.status} />;
+      })}
     </svg>
   );
 }
 
-function FloweringTree({ decayStatus = 'active' }: { decayStatus?: string }) {
+function FloweringTree({ decayStatus = 'active', keySteps = [] }: { decayStatus?: string; keySteps?: KeyStepFruitData[] }) {
   const cx = 280, baseY = 378;
   const branches = React.useMemo(() => buildTree(cx, baseY, 6, decayStatus), [decayStatus]);
 
@@ -581,6 +659,9 @@ function FloweringTree({ decayStatus = 'active' }: { decayStatus?: string }) {
     delay: rng(i * 73 + 8) * 2.5,
     rot: rng(i * 73 + 9) * 72,
   }));
+
+  // Combined placement candidates for key-step fruits
+  const ksSlots = [...tips4, ...tips5];
 
   return (
     <svg viewBox="0 0 560 430" style={{ width: "100%", height: "100%" }}>
@@ -628,11 +709,17 @@ function FloweringTree({ decayStatus = 'active' }: { decayStatus?: string }) {
           decayStatus={decayStatus}
         />
       ))}
+
+      {/* NEW: Key-step fruits overlay */}
+      {keySteps.slice(0, Math.max(6, ksSlots.length)).map((ks, i) => {
+        const slot = ksSlots[i % Math.max(1, ksSlots.length)] || { x: cx, y: baseY - 80 };
+        return <KeyStepFruit key={`ks${i}`} x={slot.x + (rng(i * 7) - 0.5) * 6} y={slot.y + 6} r={5.5} delay={i * 0.35} status={ks.status} />;
+      })}
     </svg>
   );
 }
 
-function FruitingTree({ decayStatus = 'active' }: { decayStatus?: string }) {
+function FruitingTree({ decayStatus = 'active', keySteps = [] }: { decayStatus?: string; keySteps?: KeyStepFruitData[] }) {
   const cx = 280, baseY = 378;
   const branches = React.useMemo(() => buildTree(cx, baseY, 6, decayStatus), [decayStatus]);
 
@@ -657,6 +744,9 @@ function FruitingTree({ decayStatus = 'active' }: { decayStatus?: string }) {
     r: 4 + rng(i * 83 + 7) * 3,
     delay: rng(i * 83 + 8) * 2,
   }));
+
+  // Combined placement candidates for key-step fruits
+  const ksSlots = [...tips5, ...tips4, ...tips6];
 
   return (
     <svg viewBox="0 0 560 430" style={{ width: "100%", height: "100%" }}>
@@ -689,6 +779,12 @@ function FruitingTree({ decayStatus = 'active' }: { decayStatus?: string }) {
           <path d={`M${a.x},${a.y - a.r} Q${a.x + a.r * 0.4},${a.y - a.r * 1.5} ${a.x + a.r * 0.2},${a.y - a.r * 1.7}`} stroke="#3a2006" strokeWidth="1.2" strokeLinecap="round" fill="none" />
         </g>
       ))}
+
+      {/* NEW: Key-step fruits overlay */}
+      {keySteps.slice(0, Math.max(6, ksSlots.length)).map((ks, i) => {
+        const slot = ksSlots[i % Math.max(1, ksSlots.length)] || { x: cx, y: baseY - 100 };
+        return <KeyStepFruit key={`ks${i}`} x={slot.x + (rng(i * 7) - 0.5) * 6} y={slot.y + 8} r={5.5} delay={i * 0.35} status={ks.status} />;
+      })}
     </svg>
   );
 }
@@ -701,7 +797,13 @@ const ACHIEVEMENTS = [
   { icon: "🏆", title: "Perfect Week", sub: "Unlocked 1 Week Ago", color: "#f59e0b" },
 ];
 
-export default function AchievementTree({ projectId }: { projectId?: string }) {
+export default function AchievementTree({
+  projectId,
+  keySteps = [],
+}: {
+  projectId?: string;
+  keySteps?: KeyStepFruitData[];
+}) {
   const [points, setPoints] = React.useState(0);
   const [stage, setStage] = React.useState(STAGES[0]);
   const [decayStatus, setDecayStatus] = React.useState<'active'|'wilting'|'dying'>('active');
@@ -743,7 +845,7 @@ export default function AchievementTree({ projectId }: { projectId?: string }) {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, [projectId]);
-  
+
   // Real-time synchronization via WebSocket
   useWebSocket({
     'project_progress_updated': (data) => {
@@ -775,16 +877,14 @@ export default function AchievementTree({ projectId }: { projectId?: string }) {
     : 100;
   const isBlooming = stage.key === "flowering" || stage.key === "fruiting";
 
-  // decayStatus is fetched and stored in state
-
   function renderTree() {
     switch (stage.key) {
-      case "seed": return <SeedTree />;
-      case "sprout": return <SproutTree />;
-      case "sapling": return <SaplingTree decayStatus={decayStatus} />;
-      case "tree": return <YoungTree decayStatus={decayStatus} />;
-      case "flowering": return <FloweringTree decayStatus={decayStatus} />;
-      case "fruiting": return <FruitingTree decayStatus={decayStatus} />;
+      case "seed": return <SeedTree keySteps={keySteps} />;
+      case "sprout": return <SproutTree keySteps={keySteps} />;
+      case "sapling": return <SaplingTree decayStatus={decayStatus} keySteps={keySteps} />;
+      case "tree": return <YoungTree decayStatus={decayStatus} keySteps={keySteps} />;
+      case "flowering": return <FloweringTree decayStatus={decayStatus} keySteps={keySteps} />;
+      case "fruiting": return <FruitingTree decayStatus={decayStatus} keySteps={keySteps} />;
       default: return null;
     }
   }
@@ -818,4 +918,3 @@ export default function AchievementTree({ projectId }: { projectId?: string }) {
     </div>
   );
 }
-

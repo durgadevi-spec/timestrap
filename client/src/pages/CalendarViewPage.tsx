@@ -259,6 +259,11 @@ const fmtHour = (h: number): string => {
   return h < 12 ? `${h} AM` : `${h - 12} PM`;
 };
 
+const getIsLightMode = (): boolean => {
+  if (typeof document === "undefined") return false;
+  return document.documentElement.getAttribute("style")?.includes("invert") ?? false;
+};
+
 // ─── Components ───────────────────────────────────────────────────────────────
 
 function EventPill({ event, onClick, style, compact = false, onDragStart, onDragEnd }: EventPillProps & { onDragStart?: (e: React.DragEvent) => void; onDragEnd?: () => void }) {
@@ -314,7 +319,7 @@ function DayColumn({ day, events, onSlotClick, onEventClick, onDragStart, onDrag
           }}
           onDragLeave={(e) => {
             setDragOverHour(null);
-            (e.currentTarget as HTMLDivElement).style.background = "#f8f9ff";
+            (e.currentTarget as HTMLDivElement).style.background = getIsLightMode() ? "#070600" : "#f8f9ff";
           }}
           onDrop={(e) => {
             e.preventDefault();
@@ -337,7 +342,7 @@ function DayColumn({ day, events, onSlotClick, onEventClick, onDragStart, onDrag
             }
           }}
           style={{ height: SLOT_H, borderBottom: "1px solid #f0f0f0", boxSizing: "border-box", cursor: "pointer", background: dragOverHour === hour ? "#e8f0ff" : "" }}
-          onMouseEnter={(e) => { if (dragOverHour !== hour) (e.currentTarget as HTMLDivElement).style.background = "#f8f9ff"; }}
+          onMouseEnter={(e) => { if (dragOverHour !== hour) (e.currentTarget as HTMLDivElement).style.background = getIsLightMode() ? "#070600" : "#f8f9ff"; }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = dragOverHour === hour ? "#e8f0ff" : ""; }}
         />
       ))}
@@ -429,9 +434,9 @@ function MonthGrid({ monthDays, selectedDate, events, onDayClick, today }: Month
             <div
               key={day.toISOString()}
               onClick={() => onDayClick(day)}
-              style={{ border: "1px solid #f0f0f0", padding: "4px 6px", cursor: "pointer", overflow: "hidden", background: isSel ? "#e8f0fe" : "white" }}
-              onMouseEnter={(e) => { if (!isSel) (e.currentTarget as HTMLDivElement).style.background = "#fafafa"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = isSel ? "#e8f0fe" : "white"; }}
+              style={{ border: "1px solid #f0f0f0", padding: "4px 6px", cursor: "pointer", overflow: "hidden", background: isSel ? "#e8f0fe" : (getIsLightMode() ? "#000000" : "white") }}
+              onMouseEnter={(e) => { if (!isSel) (e.currentTarget as HTMLDivElement).style.background = getIsLightMode() ? "#090A0C" : "#fafafa"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = isSel ? "#e8f0fe" : (getIsLightMode() ? "#000000" : "white"); }}
             >
               <div style={{ display: "flex", justifyContent: "center", marginBottom: 2 }}>
                 <div style={{ width: 24, height: 24, borderRadius: "50%", background: dayIsToday ? "#1a73e8" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -657,7 +662,7 @@ function EventModal({ event, onClose, onSave, onDelete, mode, user }: EventModal
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, width: 480, maxWidth: "95vw", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: getIsLightMode() ? "#000000" : "#fff", borderRadius: 12, width: 480, maxWidth: "95vw", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
         <div style={{ background: EVENT_COLORS[colorIdx].bg, padding: "20px 24px 16px", color: "#fff" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <input
@@ -699,7 +704,7 @@ function EventModal({ event, onClose, onSave, onDelete, mode, user }: EventModal
               value={selectedTaskId}
               onChange={(e) => handleTaskChange(e.target.value)}
               disabled={!selectedProjectId || loadingTasks}
-              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 12px", fontSize: 14, outline: "none", background: "#fff" }}
+              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 12px", fontSize: 14, outline: "none", background: getIsLightMode() ? "#000000" : "#fff" }}
             >
               <option value="">{selectedProjectId ? "Select a task (optional)" : "Choose a project to load tasks"}</option>
               {tasks.map((task) => (
@@ -737,7 +742,7 @@ function EventModal({ event, onClose, onSave, onDelete, mode, user }: EventModal
               <button onClick={() => onDelete(event.id!)} style={{ background: "none", border: "none", color: "#d93025", cursor: "pointer", fontSize: 13, padding: "8px 0" }}>Delete event</button>
             ) : <div />}
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={onClose} style={{ padding: "8px 20px", border: "1px solid #dadce0", borderRadius: 6, background: "white", cursor: "pointer", fontSize: 14, color: "#3c4043" }}>Cancel</button>
+              <button onClick={onClose} style={{ padding: "8px 20px", border: "1px solid #dadce0", borderRadius: 6, background: getIsLightMode() ? "#000000" : "white", cursor: "pointer", fontSize: 14, color: "#3c4043" }}>Cancel</button>
               <button
                 onClick={() => onSave({ id: event?.id || String(Date.now()), title, project, date, startTime: start, endTime: end, colorIdx, source: event?.source || "manual", pmsId: selectedTask?.id || event?.pmsId })}
                 style={{ padding: "8px 20px", border: "none", borderRadius: 6, background: "#1a73e8", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 500 }}
@@ -1071,14 +1076,14 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
         : format(selectedDate, "EEEE, MMMM d, yyyy");
 
   return (
-    <div style={{ display: "flex", height: "100vh", fontFamily: "'Google Sans', Roboto, sans-serif", background: "#fff", color: "#3c4043", overflow: "hidden" }}>
+    <div style={{ display: "flex", height: "100vh", fontFamily: "'Google Sans', Roboto, sans-serif", background: getIsLightMode() ? "#000000" : "#fff", color: "#3c4043", overflow: "hidden" }}>
       {/* Sidebar */}
       {sidebarOpen && (
-        <div style={{ width: 256, borderRight: "1px solid #e0e0e0", display: "flex", flexDirection: "column", flexShrink: 0, overflowY: "auto" }}>
+        <div className="calendar-left-panel" style={{ width: 256, borderRight: "1px solid #e0e0e0", display: "flex", flexDirection: "column", flexShrink: 0, overflowY: "auto" }}>
           <div style={{ padding: "12px 16px" }}>
             <button
               onClick={() => openNew(today, 9)}
-              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px 10px 14px", border: "none", borderRadius: 24, background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.2)", cursor: "pointer", fontSize: 14, color: "#3c4043", fontWeight: 500 }}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px 10px 14px", border: "none", borderRadius: 24, background: getIsLightMode() ? "#000000" : "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.2)", cursor: "pointer", fontSize: 14, color: "#3c4043", fontWeight: 500 }}
             >
               <span style={{ fontSize: 22, color: "#1a73e8", fontWeight: 300, lineHeight: 1 }}>+</span>
               Create
@@ -1106,7 +1111,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
                 style={{
                   border: "1px solid #dadce0",
                   borderRadius: 6,
-                  background: googleConnected ? "#fff" : "#1a73e8",
+                  background: googleConnected ? (getIsLightMode() ? "#000000" : "#fff") : "#1a73e8",
                   color: googleConnected ? "#3c4043" : "#fff",
                   padding: "8px 12px",
                   cursor: user?.id ? "pointer" : "not-allowed",
@@ -1185,7 +1190,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
       {/* Main area */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         {/* Top bar */}
-        <div style={{ display: "flex", alignItems: "center", height: 56, padding: "0 16px", borderBottom: "1px solid #e0e0e0", gap: 8, flexShrink: 0 }}>
+        <div className="calendar-header-bar" style={{ display: "flex", alignItems: "center", height: 56, padding: "0 16px", borderBottom: "1px solid #e0e0e0", gap: 8, flexShrink: 0 }}>
           <button onClick={() => setSidebarOpen((o) => !o)} style={{ background: "none", border: "none", cursor: "pointer", color: "#5f6368", fontSize: 20, padding: "6px", borderRadius: "50%", display: "flex" }}>☰</button>
 
           <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
@@ -1195,7 +1200,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
             <span style={{ fontSize: 18, color: "#3c4043", fontWeight: 400 }}>Calendar</span>
           </div>
 
-          <button onClick={() => setSelectedDate(today)} style={{ marginLeft: 16, padding: "6px 14px", border: "1px solid #dadce0", borderRadius: 6, background: "#fff", cursor: "pointer", fontSize: 13, color: "#3c4043" }}>Today</button>
+          <button onClick={() => setSelectedDate(today)} style={{ marginLeft: 16, padding: "6px 14px", border: "1px solid #dadce0", borderRadius: 6, background: getIsLightMode() ? "#000000" : "#fff", cursor: "pointer", fontSize: 13, color: "#3c4043" }}>Today</button>
           <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", cursor: "pointer", color: "#5f6368", fontSize: 20, padding: "4px 6px" }}>‹</button>
           <button onClick={() => navigate(1)} style={{ background: "none", border: "none", cursor: "pointer", color: "#5f6368", fontSize: 20, padding: "4px 6px" }}>›</button>
 
@@ -1208,7 +1213,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
                 onClick={() => setViewMode(mode)}
                 style={{
                   padding: "6px 14px", border: "none", cursor: "pointer", fontSize: 13,
-                  background: viewMode === mode ? "#e8f0fe" : "#fff",
+                  background: viewMode === mode ? "#e8f0fe" : (getIsLightMode() ? "#000000" : "#fff"),
                   color: viewMode === mode ? "#1a73e8" : "#3c4043",
                   fontWeight: viewMode === mode ? 600 : 400,
                   borderRight: mode !== "month" ? "1px solid #dadce0" : "none",
@@ -1219,7 +1224,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
         </div>
 
         {/* Calendar body */}
-        <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
+        <div className="calendar-main-grid" style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
           {viewMode === "week" && (
             <WeekGrid weekDays={weekDays} events={filteredEvents} onSlotClick={openNew} onEventClick={openEdit} today={today} />
           )}

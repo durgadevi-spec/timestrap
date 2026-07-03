@@ -1,9 +1,49 @@
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { LogOut, Menu, Calendar, Sun, Moon } from 'lucide-react';
+import { Calendar, Sun, Moon, Settings } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Menu } from 'lucide-react';
 import { User, UserRole } from '@/context/AuthContext';
 import logoImage from '@assets/WhatsApp_Image_2025-11-11_at_11.06.02_AM_1765464690595.jpeg';
 import AlertsPopover from './AlertsPopover';
+
+const THEME_STORAGE_KEY = 'timestrap_theme';
+
+// Apply a stored theme preference to the document. Used at app boot and on
+// every login/logout so the same theme sticks across sessions.
+export const applyStoredTheme = () => {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored === 'light') {
+      document.documentElement.style.filter = 'invert(1) hue-rotate(180deg)';
+      document.documentElement.setAttribute('data-theme', 'light');
+      if (!document.getElementById('theme-inversion')) {
+        const style = document.createElement('style');
+        style.id = 'theme-inversion';
+        style.innerHTML = 'img:not(.auth-illustration-img), video { filter: invert(1) hue-rotate(180deg); }';
+        document.head.appendChild(style);
+      }
+    } else {
+      document.documentElement.style.filter = '';
+      document.documentElement.removeAttribute('data-theme');
+      const style = document.getElementById('theme-inversion');
+      if (style) style.remove();
+    }
+  } catch {
+    // ignore storage errors (e.g. SSR or private mode)
+  }
+};
+
+// Run once on module load so the persisted theme is applied before the
+// first paint (after a reload / fresh tab opening).
+applyStoredTheme();
+
 
 interface AppHeaderProps {
   user: User;
@@ -15,13 +55,6 @@ interface AppHeaderProps {
   showDatePicker?: boolean;
 }
 
-const roleColors: Record<UserRole, string> = {
-  employee: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  manager: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  hr: 'bg-green-500/20 text-green-400 border-green-500/30',
-  admin: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-};
-
 const roleLabels: Record<UserRole, string> = {
   employee: 'Employee',
   manager: 'Manager',
@@ -29,15 +62,53 @@ const roleLabels: Record<UserRole, string> = {
   admin: 'Admin',
 };
 
-export default function AppHeader({ 
-  user, 
-  onLogout, 
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+}
+
+export default function AppHeader({
+  user,
+  onLogout,
   onMenuClick,
   onToggleSidebar,
   selectedDate = new Date(),
   onDateChange,
   showDatePicker = false
 }: AppHeaderProps) {
+  // Track theme so the icon reflects the actual state and we can save the
+  // choice to localStorage. Initial value is read from storage (or 'dark'
+  // by default) so the first render already matches what was last picked.
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      return (localStorage.getItem(THEME_STORAGE_KEY) as 'dark' | 'light') || 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+
+  // Whenever the theme state changes, persist it AND reapply the visual
+  // inversion. This is what guarantees the choice survives a logout/login.
+  useEffect(() => {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // ignore
+    }
+    applyStoredTheme();
+    // Re-apply even when switching back to 'dark' because the helper also
+    // clears any leftover inversion style.
+    if (theme === 'dark') {
+      document.documentElement.style.filter = '';
+      const style = document.getElementById('theme-inversion');
+      if (style) style.remove();
+    }
+  }, [theme]);
+
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('en-IN', {
       weekday: 'long',
@@ -56,25 +127,23 @@ export default function AppHeader({
     }
   };
 
+  const toggleTheme = () => {
+    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
+
   return (
     <header className="h-16 bg-slate-900/80 backdrop-blur-xl border-b border-blue-500/20 px-4 md:px-6 flex items-center justify-between gap-4" data-testid="app-header">
       <div className="flex items-center gap-4">
-        <Button 
-          size="icon" 
-          variant="ghost" 
+        <Button
+          size="icon"
+          variant="ghost"
           onClick={handleMenuClick}
           className="text-blue-400"
           data-testid="button-menu"
         >
           <Menu className="w-5 h-5" />
         </Button>
-        
-        <img 
-          src={logoImage} 
-          alt="Time Strap" 
-          className="h-8 md:h-10 object-contain"
-          data-testid="header-logo"
-        />
       </div>
 
       {showDatePicker && (
@@ -86,59 +155,67 @@ export default function AppHeader({
         </div>
       )}
 
-      <div className="flex items-center gap-4">
-        <div className="hidden sm:flex flex-col items-end">
-          <span className="text-sm font-medium text-white" data-testid="text-user-name">
-            {user.name}
-          </span>
-          <span className="text-xs text-blue-300/60" data-testid="text-user-code">
-            {user.employeeCode}
-          </span>
-        </div>
-        
-        <Badge 
-          variant="outline" 
-          className={`${roleColors[user.role]} text-xs`}
-          data-testid="badge-user-role"
-        >
-          {roleLabels[user.role]}
-        </Badge>
-
+      <div className="flex items-center gap-3">
+        {/* Alerts */}
         <AlertsPopover employeeId={user.id} />
-        
-        <Button 
-          size="icon" 
-          variant="ghost" 
-          onClick={() => {
-            const isDark = document.documentElement.style.filter === '';
-            if (isDark) {
-              document.documentElement.style.filter = 'invert(1) hue-rotate(180deg)';
-              const style = document.createElement('style');
-              style.id = 'theme-inversion';
-              style.innerHTML = 'img, video { filter: invert(1) hue-rotate(180deg); }';
-              document.head.appendChild(style);
-            } else {
-              document.documentElement.style.filter = '';
-              const style = document.getElementById('theme-inversion');
-              if (style) style.remove();
-            }
-          }}
+
+        {/* Theme toggle */}
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={toggleTheme}
           className="text-slate-400 hover:text-white"
-          title="Toggle Theme"
+          title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          data-testid="button-toggle-theme"
         >
-          <Sun className="w-5 h-5 hidden dark-filter-visible:block" />
-          <Moon className="w-5 h-5 block dark-filter-visible:hidden" />
+          {theme === 'dark' ? (
+            <Sun className="w-5 h-5" />
+          ) : (
+            <Moon className="w-5 h-5" />
+          )}
         </Button>
-        
-        <Button 
-          size="icon" 
-          variant="ghost" 
-          onClick={onLogout}
-          className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
-          data-testid="button-logout"
-        >
-          <LogOut className="w-5 h-5" />
-        </Button>
+
+        {/* User avatar + dropdown menu */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="header-user-avatar-trigger"
+              aria-label="User menu"
+              data-testid="button-user-menu"
+            >
+              <div className="header-user-avatar-fallback">
+                {getInitials(user.name)}
+              </div>
+            </button>
+          </DropdownMenuTrigger>
+
+          <DropdownMenuContent align="end" className="w-52">
+            {/* Identity block */}
+            <div className="header-user-menu-identity">
+              <div className="header-user-menu-name" data-testid="text-user-name">{user.name}</div>
+              <div className="header-user-menu-code" data-testid="text-user-code">{user.employeeCode}</div>
+              <span className="header-user-menu-badge">{roleLabels[user.role]}</span>
+            </div>
+
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem disabled className="flex items-center justify-between text-slate-400 cursor-not-allowed">
+              <span className="flex items-center gap-2">
+                <Settings className="w-4 h-4" />
+                Settings
+              </span>
+              <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded font-medium">Soon</span>
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              onClick={onLogout}
+              className="header-user-menu-logout"
+              data-testid="button-logout"
+            >
+              Logout
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );

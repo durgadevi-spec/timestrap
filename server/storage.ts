@@ -161,6 +161,12 @@ export interface IStorage {
   getDailySubmissionsByDate(date: string): Promise<DailySubmission[]>;
   getDailySubmissionsByDateRange(startDate: string, endDate: string): Promise<DailySubmission[]>;
   getBatchPlanTasksByPlanIds(planIds: string[]): Promise<PlanTask[]>;
+
+  // Password Reset OTPs
+  deleteExistingOTPs(employeeCode: string): Promise<void>;
+  createOTP(employeeCode: string, otp: string, expiresAt: Date): Promise<void>;
+  getValidOTP(employeeCode: string, otp: string): Promise<any>;
+  markOTPUsed(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -870,6 +876,30 @@ export class DatabaseStorage implements IStorage {
   async getBatchPlanTasksByPlanIds(planIds: string[]): Promise<PlanTask[]> {
     if (planIds.length === 0) return [];
     return await db.select().from(planTasks).where(inArray(planTasks.planId, planIds));
+  }
+
+  // Password Reset OTPs
+  async deleteExistingOTPs(employeeCode: string): Promise<void> {
+    await pool.query('DELETE FROM password_reset_otps WHERE employee_code = $1', [employeeCode]);
+  }
+
+  async createOTP(employeeCode: string, otp: string, expiresAt: Date): Promise<void> {
+    await pool.query(
+      'INSERT INTO password_reset_otps (employee_code, otp, expires_at) VALUES ($1, $2, $3)',
+      [employeeCode, otp, expiresAt]
+    );
+  }
+
+  async getValidOTP(employeeCode: string, otp: string): Promise<any> {
+    const result = await pool.query(
+      'SELECT * FROM password_reset_otps WHERE employee_code = $1 AND otp = $2 AND used = FALSE AND expires_at > NOW() LIMIT 1',
+      [employeeCode, otp]
+    );
+    return result.rows[0] || null;
+  }
+
+  async markOTPUsed(id: number): Promise<void> {
+    await pool.query('UPDATE password_reset_otps SET used = TRUE WHERE id = $1', [id]);
   }
 }
 

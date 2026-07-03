@@ -3,6 +3,7 @@ type Badge = { id: string; name: string; awardedAt: string };
 const POINTS_KEY = 'ts_points_v1';
 const STREAK_KEY = 'ts_streak_v1';
 const BADGES_KEY = 'ts_badges_v1';
+const DAILY_SUMMARY_KEY = 'ts_daily_points_summary_v1';
 
 function projectPointsKey(projectId: string) {
   return `ts_points_v1_project_${String(projectId).replace(/\s+/g, '_')}`;
@@ -74,8 +75,116 @@ export function addPoints(amount: number, reason?: string) {
   return { pointsAdded: next - prev, totalPoints: next, unlockedBadges: unlocked };
 }
 
+export function subtractPoints(amount: number, reason?: string) {
+  const prev = getPoints();
+  const dec = Math.max(0, Math.floor(Math.abs(amount)));
+  const next = Math.max(0, prev - dec);
+  writeNumber(POINTS_KEY, next);
+  return { pointsRemoved: prev - next, totalPoints: next };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   DAILY POINTS SUMMARY (NEW)
+   - Tracks per-task points earned (on-time) and points
+     deducted (overdue) for the current day.
+   - Used to display the Daily Points Summary dialog after
+     final timesheet submit.
+══════════════════════════════════════════════════════════════ */
+
+export interface DailyPointsEntry {
+  id: string;
+  taskName: string;
+  projectName: string;
+  amount: number;            // +ve for earned, -ve for deducted
+  type: 'earned' | 'deducted';
+  reason?: string;           // 'on-time' | 'overdue'
+  timestamp: string;         // ISO
+}
+
+export interface DailyPointsSummary {
+  date: string;              // YYYY-MM-DD
+  entries: DailyPointsEntry[];
+  totalEarned: number;
+  totalDeducted: number;
+  netPoints: number;
+}
+
+function todayKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function readDailySummary(): DailyPointsSummary {
+  const empty: DailyPointsSummary = {
+    date: todayKey(),
+    entries: [],
+    totalEarned: 0,
+    totalDeducted: 0,
+    netPoints: 0,
+  };
+  try {
+    const raw = localStorage.getItem(DAILY_SUMMARY_KEY);
+    if (!raw) return empty;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return empty;
+    // If date doesn't match today, reset
+    if (parsed.date !== empty.date) return empty;
+    return {
+      date: parsed.date || empty.date,
+      entries: Array.isArray(parsed.entries) ? parsed.entries : [],
+      totalEarned: typeof parsed.totalEarned === 'number' ? parsed.totalEarned : 0,
+      totalDeducted: typeof parsed.totalDeducted === 'number' ? parsed.totalDeducted : 0,
+      netPoints: typeof parsed.netPoints === 'number' ? parsed.netPoints : 0,
+    };
+  } catch { return empty; }
+}
+
+function writeDailySummary(summary: DailyPointsSummary) {
+  try { localStorage.setItem(DAILY_SUMMARY_KEY, JSON.stringify(summary)); } catch { }
+}
+
+export function getDailyPointsSummary(): DailyPointsSummary {
+  return readDailySummary();
+}
+
+export function clearDailyPointsSummary() {
+  try { localStorage.removeItem(DAILY_SUMMARY_KEY); } catch { }
+}
+
+function pushDailyEntry(entry: Omit<DailyPointsEntry, 'id' | 'timestamp'>) {
+  const summary = readDailySummary();
+  const newEntry: DailyPointsEntry = {
+    id: `entry_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: new Date().toISOString(),
+    ...entry,
+  };
+  summary.entries.push(newEntry);
+  if (entry.type === 'earned') {
+    summary.totalEarned += Math.abs(entry.amount);
+    summary.netPoints += Math.abs(entry.amount);
+  } else {
+    summary.totalDeducted += Math.abs(entry.amount);
+    summary.netPoints -= Math.abs(entry.amount);
+  }
+  writeDailySummary(summary);
+
+  // Dispatch event so any listening component (Achievement page) can update
+  try {
+    window.dispatchEvent(new CustomEvent('gamification:daily-summary-updated', { detail: summary }));
+  } catch {}
+
+  return newEntry;
+}
+
 // Per-project points (stored in localStorage under project-specific keys)
-export function addPointsForProject(projectId: string, amount: number, reason?: string) {
+// Extended to optionally accept a taskName so that we can record a
+// daily points entry when the task is completed on-time.
+export function addPointsForProject(
+  projectId: string,
+  amount: number,
+  reason?: string,
+  meta?: { taskName?: string; onTime?: boolean }
+) {
   try {
     const key = projectPointsKey(projectId);
     const prev = typeof projectCache[projectId] === 'number' ? projectCache[projectId] : 0;
@@ -94,6 +203,21 @@ export function addPointsForProject(projectId: string, amount: number, reason?: 
       unlocked.push(`First Task (${projectId})`);
     }
 
+    // Record daily summary entry ONLY when called with a task name
+    // so that we don't pollute the daily summary with non-task
+    // point additions (e.g. badges / system actions).
+    if (meta && meta.taskName) {
+      pushDailyEntry({
+        taskName: meta.taskName,
+        projectName: projectId,
+        amount: Math.max(0, Math.floor(amount)),
+        type: 'earned',
+        reason: meta.onTime === false ? 'overdue' : 'on-time',
+      });
+      // Add points to the employee's global score as well
+      addPoints(Math.max(0, Math.floor(amount)), reason);
+    }
+
     return { pointsAdded: next - prev, totalPoints: next, unlockedBadges: unlocked };
   } catch (e) {
     return { pointsAdded: 0, totalPoints: getPointsForProject(projectId), unlockedBadges: [] };
@@ -101,7 +225,13 @@ export function addPointsForProject(projectId: string, amount: number, reason?: 
 }
 
 // Subtract points from a project (penalty). Will not set points below 0.
-export function subtractPointsForProject(projectId: string, amount: number, reason?: string) {
+// Extended to record a daily points entry for the deduction (overdue task).
+export function subtractPointsForProject(
+  projectId: string,
+  amount: number,
+  reason?: string,
+  meta?: { taskName?: string; overdue?: boolean }
+) {
   try {
     const key = projectPointsKey(projectId);
     const prev = typeof projectCache[projectId] === 'number' ? projectCache[projectId] : 0;
@@ -118,6 +248,19 @@ export function subtractPointsForProject(projectId: string, amount: number, reas
         body: JSON.stringify({ delta: -dec, touchLastActive: false })
       }).catch(() => { /* ignore */ });
     } catch { }
+
+    // Record daily summary entry ONLY when called with a task name
+    if (meta && meta.taskName) {
+      pushDailyEntry({
+        taskName: meta.taskName,
+        projectName: projectId,
+        amount: -dec,
+        type: 'deducted',
+        reason: meta.overdue === false ? 'on-time' : 'overdue',
+      });
+      // Deduct points from the employee's global score as well
+      subtractPoints(dec, reason);
+    }
 
     return { pointsRemoved: removed, totalPoints: next, unlockedBadges: unlocked };
   } catch (e) {
@@ -241,7 +384,11 @@ export default {
   resetStreak,
   getPointsForProject,
   addPointsForProject,
+  subtractPointsForProject,
   getDecayedPointsForProject,
   getProjectDecayStatus,
-  getProjectLastActive
+  getProjectLastActive,
+  // New for daily summary
+  getDailyPointsSummary,
+  clearDailyPointsSummary,
 };

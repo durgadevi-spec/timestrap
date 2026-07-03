@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
-import logoImage from '@assets/WhatsApp_Image_2025-11-11_at_11.06.02_AM_1765464690595.jpeg';
+import knockturnLogoDark from '@/assets/animations/knockturn-logo-dark.png';
+import knockturnLogoLight from '@/assets/animations/knockturn-logo-light.png';
 
 interface WelcomePageProps {
   onComplete: () => void;
@@ -189,11 +190,19 @@ export default function WelcomePage({ onComplete }: WelcomePageProps) {
       </div>
 
       <div ref={logoRef} className="relative z-10 mb-8">
+        {/* Dark mode logo */}
         <img 
-          src={logoImage} 
-          alt="Knockturn Private Limited" 
-          className="h-20 md:h-24 object-contain"
-          data-testid="logo-knockturn"
+          src={knockturnLogoDark} 
+          alt="Knockturn" 
+          className="h-20 md:h-24 object-contain splash-logo-dark"
+          data-testid="logo-knockturn-dark"
+        />
+        {/* Light mode logo */}
+        <img 
+          src={knockturnLogoLight} 
+          alt="Knockturn" 
+          className="h-20 md:h-24 object-contain splash-logo-light"
+          data-testid="logo-knockturn-light"
         />
       </div>
 

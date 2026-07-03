@@ -348,42 +348,42 @@ export default function ApprovalPage({ user }: { user: User }) {
       {/* Stats Summary Card */}
       <div className="space-y-4">
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <Card className="bg-slate-800/40 border-blue-500/10 p-3 flex flex-col items-center justify-center text-center">
+          <Card className="bg-slate-800/40 border-blue-500/10 p-3 flex flex-col items-center justify-center text-center approvals-kpi-card">
             <span className="text-[10px] text-blue-400 font-bold uppercase mb-1">Total Timesheets</span>
             <span className="text-xl font-bold text-white">{stats.total}</span>
           </Card>
-          <Card className="bg-yellow-500/5 border-yellow-500/20 p-3 flex flex-col items-center justify-center text-center">
+          <Card className="bg-yellow-500/5 border-yellow-500/20 p-3 flex flex-col items-center justify-center text-center approvals-kpi-card">
             <span className="text-[10px] text-yellow-400 font-bold uppercase mb-1">Pending</span>
             <span className="text-xl font-bold text-yellow-400">{stats.pending}</span>
           </Card>
-          <Card className="bg-blue-500/5 border-blue-500/20 p-3 flex flex-col items-center justify-center text-center">
+          <Card className="bg-blue-500/5 border-blue-500/20 p-3 flex flex-col items-center justify-center text-center approvals-kpi-card">
             <span className="text-[10px] text-blue-400 font-bold uppercase mb-1">Mgr Appr</span>
             <span className="text-xl font-bold text-blue-400">{stats.manager_approved}</span>
           </Card>
-          <Card className="bg-green-500/5 border-green-500/20 p-3 flex flex-col items-center justify-center text-center">
+          <Card className="bg-green-500/5 border-green-500/20 p-3 flex flex-col items-center justify-center text-center approvals-kpi-card">
             <span className="text-[10px] text-green-400 font-bold uppercase mb-1">Approved</span>
             <span className="text-xl font-bold text-green-400">{stats.approved}</span>
           </Card>
-          <Card className="bg-orange-500/5 border-orange-500/20 p-3 flex flex-col items-center justify-center text-center">
+          <Card className="bg-orange-500/5 border-orange-500/20 p-3 flex flex-col items-center justify-center text-center approvals-kpi-card">
             <span className="text-[10px] text-orange-400 font-bold uppercase mb-1">On Hold</span>
             <span className="text-xl font-bold text-orange-400">{stats.on_hold}</span>
           </Card>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Card className="bg-cyan-500/5 border-cyan-500/20 p-3 flex flex-col items-center justify-center text-center">
+          <Card className="bg-cyan-500/5 border-cyan-500/20 p-3 flex flex-col items-center justify-center text-center approvals-kpi-card">
             <span className="text-[10px] text-cyan-400 font-bold uppercase mb-1">Total Site Reports</span>
             <span className="text-xl font-bold text-cyan-400">{siteStats.total}</span>
           </Card>
-          <Card className="bg-yellow-500/5 border-yellow-500/20 p-3 flex flex-col items-center justify-center text-center">
+          <Card className="bg-yellow-500/5 border-yellow-500/20 p-3 flex flex-col items-center justify-center text-center approvals-kpi-card">
             <span className="text-[10px] text-yellow-400 font-bold uppercase mb-1">Site Pending</span>
             <span className="text-xl font-bold text-yellow-400">{siteStats.pending}</span>
           </Card>
-          <Card className="bg-green-500/5 border-green-500/20 p-3 flex flex-col items-center justify-center text-center">
+          <Card className="bg-green-500/5 border-green-500/20 p-3 flex flex-col items-center justify-center text-center approvals-kpi-card">
             <span className="text-[10px] text-green-400 font-bold uppercase mb-1">Site Approved</span>
             <span className="text-xl font-bold text-green-400">{siteStats.approved}</span>
           </Card>
-          <Card className="bg-red-500/5 border-red-500/20 p-3 flex flex-col items-center justify-center text-center">
+          <Card className="bg-red-500/5 border-red-500/20 p-3 flex flex-col items-center justify-center text-center approvals-kpi-card">
             <span className="text-[10px] text-red-400 font-bold uppercase mb-1">Site Rejected</span>
             <span className="text-xl font-bold text-red-400">{siteStats.rejected}</span>
           </Card>
