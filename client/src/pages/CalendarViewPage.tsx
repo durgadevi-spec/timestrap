@@ -540,8 +540,8 @@ function EventModal({ event, onClose, onSave, onDelete, mode, user }: EventModal
 
         const nextProjects = Array.isArray(data)
           ? data.map((candidate: Partial<ProjectOption> & { project_name?: string; project_code?: string }, index: number) =>
-              normalizeProjectOption(candidate, index)
-            )
+            normalizeProjectOption(candidate, index)
+          )
           : [];
         setProjects(nextProjects);
       } catch {
@@ -773,23 +773,88 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
   const [draggedEvent, setDraggedEvent] = useState<CalendarEvent | null>(null);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !user?.id) return;
 
+    let isMounted = true;
     const targetDate = format(selectedDate, "yyyy-MM-dd");
-    const manualEvents = readStoredArray(getManualEventsKey(user?.id)).map((event: any) => ({
-      ...event,
-      title: normalizeEventTitle(event.title, event.project),
-      source: "manual" as const,
-    }));
 
-    const scheduleKey = `plan_schedule_${user?.id}_${targetDate}`;
-    const scheduleTasks = readStoredArray(scheduleKey);
-    const legacyPlanTasks = readStoredArray(`pendingTasks_${user?.id}_${targetDate}`).filter(isPlanTask);
-    const planEvents = mergePlanEvents(scheduleTasks.length > 0 ? scheduleTasks : legacyPlanTasks, targetDate);
+    const loadEvents = async () => {
+      try {
+        let serverPlanTasks = [];
+        const res = await fetch(`/api/daily-plans/${targetDate}/${user.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.submitted && data.tasks) {
+            serverPlanTasks = data.tasks;
+          }
+        }
 
-    const mergedEvents = [...manualEvents, ...planEvents];
-    const unique = Array.from(new Map(mergedEvents.map((event) => [event.id, event])).values());
-    setEvents(unique);
+        if (!isMounted) return;
+
+        const manualEvents = readStoredArray(getManualEventsKey(user?.id)).map((event: any) => ({
+          ...event,
+          title: normalizeEventTitle(event.title, event.project),
+          source: "manual" as const,
+        }));
+
+        const scheduleKey = `plan_schedule_${user?.id}_${targetDate}`;
+        const scheduleTasks = readStoredArray(scheduleKey);
+        const legacyPlanTasks = readStoredArray(`pendingTasks_${user?.id}_${targetDate}`).filter(isPlanTask).map((t: any) => {
+          let scheduleData: any = {};
+          try {
+            scheduleData = typeof t.scheduleData === 'string' ? JSON.parse(t.scheduleData) : (t.scheduleData || {});
+          } catch (e) { }
+          return {
+            ...t,
+            startTime: scheduleData.startTime || t.startTime || "09:00",
+            endTime: scheduleData.endTime || t.endTime || "10:00",
+          };
+        });
+
+        // Use server tasks if available, otherwise fallback to local storage
+        let basePlanTasks = legacyPlanTasks;
+        if (serverPlanTasks.length > 0) {
+          basePlanTasks = serverPlanTasks.map((st: any) => {
+            const taskId = st.taskId || st.id;
+            const localMatch = scheduleTasks.find((lt: any) => lt.pmsId === taskId || lt.id === taskId);
+
+            // Extract timings safely from scheduleData or fallbacks
+            let scheduleData = {};
+            try {
+              scheduleData = typeof st.scheduleData === 'string' ? JSON.parse(st.scheduleData) : (st.scheduleData || {});
+            } catch (e) { }
+
+            const startTime = scheduleData.startTime || st.startTime || localMatch?.startTime || "09:00";
+            const endTime = scheduleData.endTime || st.endTime || localMatch?.endTime || "10:00";
+
+            return {
+              ...st,
+              id: localMatch?.id || st.id || taskId,
+              pmsId: taskId,
+              googleEventId: localMatch?.googleEventId || st.googleEventId,
+              startTime,
+              endTime,
+            };
+          });
+        } else if (scheduleTasks.length > 0) {
+          basePlanTasks = scheduleTasks;
+        }
+
+        const planEvents = mergePlanEvents(basePlanTasks, targetDate);
+
+        const mergedEvents = [...manualEvents, ...planEvents];
+        const unique = Array.from(new Map(mergedEvents.map((event) => [event.id, event])).values());
+        setEvents(unique);
+      } catch (err) {
+        console.error("Failed to load events for calendar:", err);
+      }
+    };
+
+    loadEvents();
+
+    return () => {
+      isMounted = false;
+    };
   }, [selectedDate, user?.id]);
 
   useEffect(() => {
@@ -879,7 +944,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
     const durationMinutes = toMin(draggedEvent.endTime) - toMin(draggedEvent.startTime);
     const newStartMinutes = targetHour * 60;
     const newEndMinutes = Math.min(23 * 60 + 59, newStartMinutes + durationMinutes);
-    
+
     const newStartTime = `${String(targetHour).padStart(2, '0')}:00`;
     const newEndHours = Math.floor(newEndMinutes / 60);
     const newEndMins = newEndMinutes % 60;
@@ -967,7 +1032,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
     syncableEvents.forEach(evt => {
       console.log(`  - ${evt.title} (${evt.startTime}-${evt.endTime}) googleEventId: ${evt.googleEventId || 'NONE'}`);
     });
-    
+
     // Track events with googleEventId (for detecting deleted events)
     const eventsWithGoogleId = syncableEvents.filter(e => e.googleEventId);
     const eventsWithoutGoogleId = syncableEvents.filter(e => !e.googleEventId);

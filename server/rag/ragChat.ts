@@ -297,6 +297,9 @@ STRICT RULES:
 - generating any report → generateReport (HR/Admin only)
 - always ask format preference (pdf or excel) before generating if not specified by the user.
 - NEVER assume, guess, or default a date range for report generation. If the user has not explicitly provided a date range (e.g. "for this month", "from June 1st to June 19th"), you MUST ask the user to specify or confirm the date range first. You are STRICTLY FORBIDDEN from calling the generateReport tool before you have obtained the date range from the user.
+- When user asks for task names, start times, end times, or individual task details for employees — always use report_type: "detailed_timesheet", never compliance or productivity.
+- When user asks for "daily plan per employee" or "plan for the day report" or when a multi-employee/per-employee daily plan report is requested — always use report_type: "daily_plan_per_employee", never compliance, timesheet or general daily_plan.
+- When user asks for "timesheet per employee" or "timesheet breakdown per person" or hours worked per person — always use report_type: "timesheet_per_employee".
 - checking performance/productivity → getPerformancePrediction
 - checking task deadline risks → getTaskRisks  
 - checking attendance risk → getAttendanceRiskCheck
@@ -1263,7 +1266,11 @@ Report types:
 - team_productivity: requires startDate, endDate
 - overdue_tasks: no date range needed
 - project_progress: no date range needed
-- project_tasks: requires projectCode`,
+- project_tasks: requires projectCode
+- detailed_timesheet: shows every task entry per employee with exact start time, end time, task name, project name for a date range
+- daily_plan: shows all planned tasks per employee with start time, end time, duration from plan_tasks table
+- daily_plan_per_employee: shows all planned tasks formatted with one sheet per employee, date bars, color-coded rows (white/light blue for work, yellow for break, light red for pending) for a date range
+- timesheet_per_employee: one sheet per employee showing actual timesheet entries with start time, end time, hours worked, color coded by approval status`,
         parameters: {
           type: "object",
           properties: {
@@ -1279,6 +1286,10 @@ Report types:
                 "overdue_tasks",
                 "project_progress",
                 "project_tasks",
+                "detailed_timesheet",
+                "daily_plan",
+                "daily_plan_per_employee",
+                "timesheet_per_employee",
               ],
             },
             format: {
@@ -3326,6 +3337,10 @@ ${instructions}`;
               "team_compliance",
               "team_leave",
               "team_productivity",
+              "detailed_timesheet",
+              "daily_plan",
+              "daily_plan_per_employee",
+              "timesheet_per_employee",
             ];
 
             const employeeReports = [
@@ -3357,12 +3372,24 @@ ${instructions}`;
                 generateOverdueTasksReport,
                 generateProjectProgressReport,
                 generateProjectTaskBreakdownReport,
+                generateDetailedTimesheetReport,
+                generateDailyPlanReport,
+                generateDailyPlanPerEmployeeReport,
+                generateTimesheetPerEmployeeReport,
               } = await import("../reports/reportGenerator");
 
               let fileName = "";
 
               if (reportType === "employee_timesheet") {
                 fileName = await generateEmployeeTimesheetReport(employeeCode, startDate, endDate, format);
+              } else if (reportType === "detailed_timesheet") {
+                fileName = await generateDetailedTimesheetReport(startDate, endDate, format);
+              } else if (reportType === "daily_plan") {
+                fileName = await generateDailyPlanReport(startDate, endDate, format);
+              } else if (reportType === "daily_plan_per_employee") {
+                fileName = await generateDailyPlanPerEmployeeReport(startDate, endDate, format);
+              } else if (reportType === "timesheet_per_employee") {
+                fileName = await generateTimesheetPerEmployeeReport(startDate, endDate, format);
               } else if (reportType === "employee_leave") {
                 fileName = await generateEmployeeLeaveReport(employeeCode, startDate, endDate, format);
               } else if (reportType === "employee_tasks") {

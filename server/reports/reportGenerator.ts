@@ -732,3 +732,646 @@ export async function generateProjectTaskBreakdownReport(
     return path.basename(filePath);
   }
 }
+
+export async function generateDetailedTimesheetReport(
+  startDate: string,
+  endDate: string,
+  format: "pdf" | "excel"
+): Promise<string> {
+  const res = await pool.query(
+    `SELECT 
+      e.name as employee_name,
+      te.date,
+      te.project_name,
+      te.task_description as task_name,
+      te.start_time,
+      te.end_time,
+      te.total_hours,
+      te.status
+     FROM time_entries te
+     JOIN employees e ON te.employee_code = e.employee_code
+     WHERE te.date BETWEEN $1 AND $2
+     AND te.status != 'draft'
+     ORDER BY te.date, e.name, te.start_time`,
+    [startDate, endDate]
+  );
+
+  const rows = res.rows;
+
+  if (format === "excel") {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Detailed Timesheet");
+
+    // Header
+    ws.columns = [
+      { header: "Employee",     key: "employee_name", width: 22 },
+      { header: "Date",         key: "date",          width: 14 },
+      { header: "Project",      key: "project_name",  width: 28 },
+      { header: "Task",         key: "task_name",     width: 35 },
+      { header: "Start Time",   key: "start_time",    width: 12 },
+      { header: "End Time",     key: "end_time",      width: 12 },
+      { header: "Total Hours",  key: "total_hours",   width: 12 },
+      { header: "Status",       key: "status",        width: 16 },
+    ];
+
+    // Style header row
+    ws.getRow(1).eachCell(cell => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3F3F8F' } };
+      cell.alignment = { horizontal: 'center' };
+    });
+
+    // Add rows
+    rows.forEach(row => ws.addRow(row));
+
+    // Alternate row colors
+    for (let i = 2; i <= rows.length + 1; i++) {
+      if (i % 2 === 0) {
+        ws.getRow(i).eachCell(cell => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0FF' } };
+        });
+      }
+    }
+
+    const filename = `Detailed_Timesheet_${startDate}_to_${endDate}_${Date.now()}.xlsx`;
+    const filepath = path.join(reportsDir, filename);
+    await wb.xlsx.writeFile(filepath);
+    return filename;
+  } else {
+    const { doc, filePath } = createPDFDoc(
+      "Detailed Timesheet Report",
+      `Period: ${startDate} to ${endDate}`
+    );
+    pdfTableRow(doc, ["Employee", "Date", "Project", "Task", "Start", "End", "Hours", "Status"], true);
+    if (rows.length === 0) {
+      doc.moveDown(1);
+      doc.fontSize(10).font("Helvetica-Oblique").fillColor("#6B7280")
+         .text("No records found for the given period", 40, doc.y, { align: "center" });
+    } else {
+      rows.forEach((r) => {
+        pdfTableRow(doc, [
+          r.employee_name,
+          formatDate(r.date),
+          r.project_name?.slice(0, 16),
+          r.task_name?.slice(0, 20),
+          r.start_time,
+          r.end_time,
+          r.total_hours?.toString(),
+          r.status
+        ]);
+      });
+    }
+    doc.end();
+    return path.basename(filePath);
+  }
+}
+
+export async function generateDailyPlanReport(
+  startDate: string,
+  endDate: string,
+  format: "pdf" | "excel"
+): Promise<string> {
+  const res = await pool.query(
+    `SELECT 
+      e.name as employee_name,
+      dp.date,
+      pt.project_name,
+      pt.task_name,
+      pt.schedule_data,
+      pt.status,
+      pt.source
+     FROM plan_tasks pt
+     JOIN daily_plans dp ON pt.plan_id = dp.id
+     JOIN employees e ON dp.employee_id = e.id
+     WHERE dp.date BETWEEN $1 AND $2
+     ORDER BY dp.date, e.name, (pt.schedule_data->>'order')::int`,
+    [startDate, endDate]
+  );
+
+  const rows = res.rows.map(row => ({
+    employee_name: row.employee_name,
+    date:          row.date,
+    project_name:  row.project_name,
+    task_name:     row.task_name,
+    start_time:    row.schedule_data?.startTime || '—',
+    end_time:      row.schedule_data?.endTime   || '—',
+    duration:      row.schedule_data?.durationMinutes 
+                     ? `${row.schedule_data.durationMinutes} min` 
+                     : '—',
+    status:        row.status,
+    source:        row.source
+  }));
+
+  if (format === "excel") {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Daily Plan Report");
+
+    ws.columns = [
+      { header: "Employee",     key: "employee_name", width: 22 },
+      { header: "Date",         key: "date",          width: 14 },
+      { header: "Project",      key: "project_name",  width: 28 },
+      { header: "Task",         key: "task_name",     width: 35 },
+      { header: "Start Time",   key: "start_time",    width: 12 },
+      { header: "End Time",     key: "end_time",      width: 12 },
+      { header: "Duration",     key: "duration",      width: 12 },
+      { header: "Status",       key: "status",        width: 16 },
+      { header: "Source",       key: "source",        width: 12 },
+    ];
+
+    ws.getRow(1).eachCell(cell => {
+      cell.font      = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3F3F8F' } };
+      cell.alignment = { horizontal: 'center' };
+    });
+
+    rows.forEach((row, idx) => {
+      const excelRow = ws.addRow(row);
+      if (idx % 2 === 0) {
+        excelRow.eachCell(cell => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0FF' } };
+        });
+      }
+    });
+
+    const filename = `Daily_Plan_${startDate}_to_${endDate}_${Date.now()}.xlsx`;
+    const filepath = path.join(reportsDir, filename);
+    await wb.xlsx.writeFile(filepath);
+    return filename;
+  } else {
+    const { doc, filePath } = createPDFDoc(
+      "Daily Plan Report",
+      `Period: ${startDate} to ${endDate}`
+    );
+    pdfTableRow(doc, ["Employee", "Date", "Project", "Task", "Start", "End", "Dur", "Status", "Src"], true);
+    if (rows.length === 0) {
+      doc.moveDown(1);
+      doc.fontSize(10).font("Helvetica-Oblique").fillColor("#6B7280")
+         .text("No records found for the given period", 40, doc.y, { align: "center" });
+    } else {
+      rows.forEach((r) => {
+        pdfTableRow(doc, [
+          r.employee_name,
+          formatDate(r.date),
+          r.project_name?.slice(0, 12),
+          r.task_name?.slice(0, 16),
+          r.start_time,
+          r.end_time,
+          r.duration,
+          r.status,
+          r.source
+        ]);
+      });
+    }
+    doc.end();
+    return path.basename(filePath);
+  }
+}
+
+export async function generateDailyPlanPerEmployeeReport(
+  startDate: string,
+  endDate: string,
+  format: "pdf" | "excel"
+): Promise<string> {
+  const res = await pool.query(
+    `SELECT 
+      e.name as employee_name,
+      dp.date,
+      pt.project_name,
+      pt.task_name,
+      pt.schedule_data->>'startTime' as start_time,
+      pt.schedule_data->>'endTime'   as end_time,
+      pt.schedule_data->>'durationMinutes' as duration_minutes,
+      pt.status,
+      pt.source
+     FROM plan_tasks pt
+     JOIN daily_plans dp ON pt.plan_id = dp.id
+     JOIN employees e ON dp.employee_id = e.id
+     WHERE dp.date BETWEEN $1 AND $2
+     ORDER BY e.name, dp.date, (pt.schedule_data->>'order')::int NULLS LAST`,
+    [startDate, endDate]
+  );
+
+  const rows = res.rows;
+
+  const employeesMap = new Map<string, any[]>();
+  rows.forEach(r => {
+    const name = r.employee_name || "Unknown";
+    if (!employeesMap.has(name)) {
+      employeesMap.set(name, []);
+    }
+    employeesMap.get(name)!.push(r);
+  });
+
+  const formatRange = (sDate: string, eDate: string) => {
+    try {
+      const s = new Date(sDate);
+      const e = new Date(eDate);
+      const getMonthName = (d: Date) => {
+        const fullMonths = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        return fullMonths[d.getMonth()];
+      };
+      const startMonth = getMonthName(s);
+      const startDay = s.getDate();
+      const endMonth = getMonthName(e);
+      const endDay = e.getDate();
+      const year = e.getFullYear();
+      if (startMonth === endMonth) {
+        return `${startMonth} ${startDay}–${endDay}, ${year}`;
+      } else {
+        return `${startMonth} ${startDay} – ${endMonth} ${endDay}, ${year}`;
+      }
+    } catch {
+      return `${sDate} to ${eDate}`;
+    }
+  };
+
+  const formatLongDate = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr);
+      const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      const fullMonths = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      return `📅 ${weekdays[d.getDay()]}, ${fullMonths[d.getMonth()]} ${d.getDate()}`;
+    } catch {
+      return `📅 ${dateStr}`;
+    }
+  };
+
+  const calcRowHeight = (project: string, task: string): number => {
+    const pLines = Math.max(1, Math.floor((project || '').length / 34));
+    const tLines = Math.max(1, Math.floor((task || '').length / 50));
+    const lines  = Math.max(pLines, tLines);
+    return Math.max(18, lines * 16);
+  };
+
+  if (format === "excel") {
+    const wb = new ExcelJS.Workbook();
+    if (employeesMap.size === 0) {
+      const ws = wb.addWorksheet("Daily Plan Report");
+      ws.addRow(["No data found for the requested period"]);
+    } else {
+      employeesMap.forEach((empRows, employeeName) => {
+        const sheetName = employeeName.substring(0, 30).replace(/[*?:\\/\[\]]/g, '');
+        const ws = wb.addWorksheet(sheetName || "Sheet");
+        ws.views = [{ state: 'frozen', ySplit: 1 }];
+        ws.columns = [
+          { key: "project_name", width: 36 },
+          { key: "task_name", width: 52 },
+          { key: "start_time", width: 10 },
+          { key: "end_time", width: 10 },
+          { key: "duration", width: 13 },
+          { key: "status", width: 15 },
+          { key: "source", width: 10 },
+        ];
+        const titleText = `Daily Plan Report — ${employeeName} | ${formatRange(startDate, endDate)}`;
+        const titleRow = ws.addRow([titleText]);
+        titleRow.height = 32;
+        ws.mergeCells(1, 1, 1, 7);
+        const titleCell = titleRow.getCell(1);
+        titleCell.font = { name: "Calibri", bold: true, color: { argb: "FFFFFFFF" }, size: 13 };
+        titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1A1A6E" } };
+        titleCell.alignment = { vertical: "middle", horizontal: "center" };
+        const datesMap = new Map<string, any[]>();
+        empRows.forEach(r => {
+          const d = r.date;
+          if (!datesMap.has(d)) datesMap.set(d, []);
+          datesMap.get(d)!.push(r);
+        });
+        const sortedDates = Array.from(datesMap.keys()).sort();
+        sortedDates.forEach((dateStr) => {
+          if (ws.rowCount > 1) ws.addRow([]);
+          const dateRow = ws.addRow([formatLongDate(dateStr)]);
+          dateRow.height = 22;
+          ws.mergeCells(ws.rowCount, 1, ws.rowCount, 7);
+          const dateCell = dateRow.getCell(1);
+          dateCell.font = { name: "Calibri", bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+          dateCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2E4057" } };
+          dateCell.alignment = { vertical: "middle", horizontal: "left" };
+          const headerRow = ws.addRow(["Project", "Task", "Start", "End", "Duration", "Status", "Source"]);
+          headerRow.height = 20;
+          headerRow.eachCell(cell => {
+            cell.font = { name: "Calibri", bold: true, color: { argb: "FFFFFFFF" }, size: 9 };
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1565C0" } };
+            cell.alignment = { vertical: "middle", horizontal: "center" };
+          });
+          const dateTasks = datesMap.get(dateStr)!;
+          const mappedTasks = dateTasks.map(t => {
+            const st = t.start_time || '—', et = t.end_time || '—', dur = t.duration_minutes ? `${t.duration_minutes} min` : '—';
+            const isBreak = (t.project_name || '').toLowerCase() === 'break' || (t.task_name || '').toLowerCase().includes('break');
+            return { project_name: t.project_name, task_name: t.task_name, start_time: st, end_time: et, duration: dur, status: t.status, source: t.source, isBreak };
+          });
+          mappedTasks.sort((a, b) => {
+            if (a.isBreak !== b.isBreak) return a.isBreak ? 1 : -1;
+            return (a.start_time || '').localeCompare(b.start_time || '');
+          });
+          let workRowIdx = 0;
+          mappedTasks.forEach(task => {
+            const taskRow = ws.addRow([task.project_name || '—', task.task_name || '—', task.start_time, task.end_time, task.duration, task.status || '—', task.source || '—']);
+            taskRow.height = calcRowHeight(task.project_name, task.task_name);
+            let fillColor = 'FFFFFFFF';
+            const project = task.project_name || '', status = task.status || '';
+            if (project.toLowerCase() === 'break') fillColor = 'FFFFF8E1';
+            else if (status === 'pending') fillColor = 'FFFCE8E8';
+            else if (status === 'approved' || status === 'manager_approved' || status === 'on_hold') fillColor = 'FFE8F5E9';
+            else fillColor = (workRowIdx % 2 === 0) ? 'FFEEF4FB' : 'FFFFFFFF', workRowIdx++;
+            const thinBorder = {
+              top: { style: 'thin' as ExcelJS.BorderStyle, color: { argb: 'FFCCCCCC' } },
+              bottom: { style: 'thin' as ExcelJS.BorderStyle, color: { argb: 'FFCCCCCC' } },
+              left: { style: 'thin' as ExcelJS.BorderStyle, color: { argb: 'FFCCCCCC' } },
+              right: { style: 'thin' as ExcelJS.BorderStyle, color: { argb: 'FFCCCCCC' } }
+            };
+            taskRow.eachCell((cell, colNumber) => {
+              cell.font = { name: "Calibri", size: 9 };
+              cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fillColor } };
+              cell.border = thinBorder;
+              cell.alignment = { horizontal: (colNumber === 1 || colNumber === 2) ? 'left' : 'center', vertical: 'middle', wrapText: true };
+            });
+          });
+        });
+      });
+    }
+    const filename = `Daily_Plan_Per_Employee_${startDate}_to_${endDate}_${Date.now()}.xlsx`;
+    const filepath = path.join(reportsDir, filename);
+    await wb.xlsx.writeFile(filepath);
+    return filename;
+  } else {
+    const { doc, filePath } = createPDFDoc("Daily Plan Per Employee", `Period: ${startDate} to ${endDate}`);
+    pdfTableRow(doc, ["Employee", "Date", "Project", "Task", "Start", "End", "Dur", "Status", "Src"], true);
+    if (rows.length === 0) {
+      doc.moveDown(1);
+      doc.fontSize(10).font("Helvetica-Oblique").fillColor("#6B7280").text("No records found for the given period", 40, doc.y, { align: "center" });
+    } else {
+      rows.forEach((r) => {
+        pdfTableRow(doc, [r.employee_name, formatDate(r.date), r.project_name?.slice(0, 12), r.task_name?.slice(0, 16), r.start_time || '—', r.end_time || '—', r.duration_minutes ? `${r.duration_minutes} min` : '—', r.status, r.source]);
+      });
+    }
+    doc.end();
+    return path.basename(filePath);
+  }
+}
+
+export async function generateTimesheetPerEmployeeReport(
+  startDate: string,
+  endDate: string,
+  format: "pdf" | "excel"
+): Promise<string> {
+  const res = await pool.query(
+    `SELECT 
+      e.name as employee_name,
+      te.date,
+      te.project_name,
+      te.task_description,
+      te.start_time,
+      te.end_time,
+      te.total_hours,
+      te.status,
+      te.quantify,
+      te.achievements,
+      te.key_step,
+      te.tools_used,
+      te.problem_and_issues,
+      te.scope_of_improvements,
+      te.percentage_complete
+     FROM time_entries te
+     JOIN employees e ON te.employee_code = e.employee_code
+     WHERE te.date BETWEEN $1 AND $2
+     ORDER BY e.name, te.date, te.start_time NULLS LAST`,
+    [startDate, endDate]
+  );
+
+  const rows = res.rows;
+
+  // Group by employee name
+  const employeesMap = new Map<string, any[]>();
+  rows.forEach(r => {
+    const name = r.employee_name || "Unknown";
+    if (!employeesMap.has(name)) {
+      employeesMap.set(name, []);
+    }
+    employeesMap.get(name)!.push(r);
+  });
+
+  const formatRange = (sDate: string, eDate: string) => {
+    try {
+      const s = new Date(sDate);
+      const e = new Date(eDate);
+      const getMonthName = (d: Date) => {
+        const fullMonths = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        return fullMonths[d.getMonth()];
+      };
+      const startMonth = getMonthName(s);
+      const startDay = s.getDate();
+      const endMonth = getMonthName(e);
+      const endDay = e.getDate();
+      const year = e.getFullYear();
+      if (startMonth === endMonth) {
+        return `${startMonth} ${startDay}–${endDay}, ${year}`;
+      } else {
+        return `${startMonth} ${startDay} – ${endMonth} ${endDay}, ${year}`;
+      }
+    } catch {
+      return `${sDate} to ${eDate}`;
+    }
+  };
+
+  const formatLongDate = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr);
+      const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      const fullMonths = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      return `📅 ${weekdays[d.getDay()]}, ${fullMonths[d.getMonth()]} ${d.getDate()}`;
+    } catch {
+      return `📅 ${dateStr}`;
+    }
+  };
+
+  const calcRowHeight = (fields: { text: string; charsPerLine: number }[]): number => {
+    const lineCounts = fields.map(f => 
+      Math.max(1, Math.ceil((f.text || '').length / f.charsPerLine))
+    );
+    const maxLines = Math.max(...lineCounts, 1);
+    return Math.max(18, maxLines * 16);
+  };
+
+  if (format === "excel") {
+    const wb = new ExcelJS.Workbook();
+
+    if (employeesMap.size === 0) {
+      const ws = wb.addWorksheet("Timesheet Report");
+      ws.addRow(["No data found for the requested period"]);
+    } else {
+      employeesMap.forEach((empRows, employeeName) => {
+        const sheetName = employeeName.substring(0, 30).replace(/[*?:\\/\[\]]/g, '');
+        const ws = wb.addWorksheet(sheetName || "Sheet");
+        ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+        ws.columns = [
+          { key: "project_name", width: 36 },
+          { key: "task_name", width: 52 },
+          { key: "start_time", width: 10 },
+          { key: "end_time", width: 10 },
+          { key: "hours", width: 13 },
+          { key: "status", width: 15 },
+          { key: "quantify", width: 40 },
+          { key: "achievements", width: 40 },
+          { key: "key_step", width: 25 },
+          { key: "tools_used", width: 25 },
+          { key: "problems", width: 35 },
+          { key: "scope", width: 35 },
+          { key: "percentage", width: 12 },
+        ];
+
+        // Row 1: Full width title
+        const titleText = `Timesheet Report — ${employeeName} | ${formatRange(startDate, endDate)}`;
+        const titleRow = ws.addRow([titleText]);
+        titleRow.height = 32;
+        ws.mergeCells(1, 1, 1, 13);
+
+        const titleCell = titleRow.getCell(1);
+        titleCell.font = { name: "Calibri", bold: true, color: { argb: "FFFFFFFF" }, size: 13 };
+        titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1A1A6E" } };
+        titleCell.alignment = { vertical: "middle", horizontal: "center" };
+
+        const datesMap = new Map<string, any[]>();
+        empRows.forEach(r => {
+          const d = r.date;
+          if (!datesMap.has(d)) {
+            datesMap.set(d, []);
+          }
+          datesMap.get(d)!.push(r);
+        });
+
+        const sortedDates = Array.from(datesMap.keys()).sort();
+
+        sortedDates.forEach((dateStr) => {
+          if (ws.rowCount > 1) {
+            ws.addRow([]);
+          }
+
+          const dateRow = ws.addRow([formatLongDate(dateStr)]);
+          dateRow.height = 22;
+          ws.mergeCells(ws.rowCount, 1, ws.rowCount, 13);
+          const dateCell = dateRow.getCell(1);
+          dateCell.font = { name: "Calibri", bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+          dateCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2E4057" } };
+          dateCell.alignment = { vertical: "middle", horizontal: "left" };
+
+          const headerRow = ws.addRow([
+            "Project", "Task", "Start", "End", "Hours", "Status", 
+            "Quantify", "Achievements", "Key Step", "Tools Used", 
+            "Problems/Issues", "Scope of Improvements", "% Complete"
+          ]);
+          headerRow.height = 20;
+          headerRow.eachCell(cell => {
+            cell.font = { name: "Calibri", bold: true, color: { argb: "FFFFFFFF" }, size: 9 };
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1565C0" } };
+            cell.alignment = { vertical: "middle", horizontal: "center" };
+          });
+
+          const dateTasks = datesMap.get(dateStr)!;
+
+          let workRowIdx = 0;
+          dateTasks.forEach(task => {
+            const toolsText = Array.isArray(task.tools_used) ? task.tools_used.join(", ") : "";
+            const pctText = task.percentage_complete !== null && task.percentage_complete !== undefined
+              ? `${task.percentage_complete}%`
+              : "—";
+
+            const rowData = [
+              task.project_name || '—',
+              task.task_description || '—',
+              task.start_time || '—',
+              task.end_time || '—',
+              task.total_hours || '—',
+              task.status || '—',
+              task.quantify || '',
+              task.achievements || '',
+              task.key_step || '',
+              toolsText || '',
+              task.problem_and_issues || '',
+              task.scope_of_improvements || '',
+              pctText
+            ];
+
+            const taskRow = ws.addRow(rowData);
+            
+            taskRow.height = calcRowHeight([
+              { text: task.project_name || '', charsPerLine: 34 },
+              { text: task.task_description || '', charsPerLine: 50 },
+              { text: task.quantify || '', charsPerLine: 38 },
+              { text: task.achievements || '', charsPerLine: 38 },
+              { text: task.key_step || '', charsPerLine: 24 },
+              { text: toolsText, charsPerLine: 24 },
+              { text: task.problem_and_issues || '', charsPerLine: 33 },
+              { text: task.scope_of_improvements || '', charsPerLine: 33 },
+            ]);
+
+            let fillColor = 'FFFFFFFF';
+            const status = task.status || '';
+
+            if (status === 'draft') {
+              fillColor = 'FFFCE8E8'; // Draft rows (#FCE8E8)
+            } else if (status === 'pending' || status === 'submitted') {
+              fillColor = 'FFFFF8E1'; // Pending/Submitted rows (#FFF8E1)
+            } else if (status === 'approved' || status === 'manager_approved' || status === 'on_hold') {
+              fillColor = 'FFE8F5E9'; // Approved rows (#E8F5E9)
+            } else {
+              fillColor = (workRowIdx % 2 === 0) ? 'FFEEF4FB' : 'FFFFFFFF';
+              workRowIdx++;
+            }
+
+            const thinBorder = {
+              top: { style: 'thin' as ExcelJS.BorderStyle, color: { argb: 'FFCCCCCC' } },
+              bottom: { style: 'thin' as ExcelJS.BorderStyle, color: { argb: 'FFCCCCCC' } },
+              left: { style: 'thin' as ExcelJS.BorderStyle, color: { argb: 'FFCCCCCC' } },
+              right: { style: 'thin' as ExcelJS.BorderStyle, color: { argb: 'FFCCCCCC' } }
+            };
+
+            taskRow.eachCell((cell, colNumber) => {
+              cell.font = { name: "Calibri", size: 9 };
+              cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fillColor } };
+              cell.border = thinBorder;
+              
+              const isTextHeavy = [1, 2, 7, 8, 9, 10, 11, 12].includes(colNumber);
+              if (isTextHeavy) {
+                cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+              } else {
+                cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+              }
+            });
+          });
+        });
+      });
+    }
+
+    const filename = `Timesheet_Per_Employee_${startDate}_to_${endDate}_${Date.now()}.xlsx`;
+    const filepath = path.join(reportsDir, filename);
+    await wb.xlsx.writeFile(filepath);
+    return filename;
+  } else {
+    const { doc, filePath } = createPDFDoc(
+      "Timesheet Per Employee",
+      `Period: ${startDate} to ${endDate}`
+    );
+    pdfTableRow(doc, ["Employee", "Date", "Project", "Task", "Start", "End", "Hours", "Status"], true);
+    if (rows.length === 0) {
+      doc.moveDown(1);
+      doc.fontSize(10).font("Helvetica-Oblique").fillColor("#6B7280")
+         .text("No records found for the given period", 40, doc.y, { align: "center" });
+    } else {
+      rows.forEach((r) => {
+        pdfTableRow(doc, [
+          r.employee_name,
+          formatDate(r.date),
+          r.project_name?.slice(0, 12),
+          r.task_description?.slice(0, 16) || '—',
+          r.start_time || '—',
+          r.end_time || '—',
+          r.total_hours || '—',
+          r.status
+        ]);
+      });
+    }
+    doc.end();
+    return path.basename(filePath);
+  }
+}
