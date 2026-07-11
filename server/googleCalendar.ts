@@ -1,4 +1,6 @@
 import type { Express, Request, Response } from "express";
+import { pmsPool } from "./pmsSupabase";
+import { resolvePmsUserId } from "./Pmscalendarevents";
 
 interface GoogleTokenResponse {
   access_token: string;
@@ -41,17 +43,24 @@ function getGoogleRedirectUri(req: Request) {
 function buildGoogleAuthUrl(req: Request) {
   const clientId = getGoogleClientId();
   const redirectUri = getGoogleRedirectUri(req);
+  const employeeCode = typeof req.query.employeeCode === "string" ? req.query.employeeCode : "";
 
   if (!clientId) {
     throw new Error("GOOGLE_CLIENT_ID is not configured.");
   }
 
-  const state = Buffer.from(`${Date.now()}-${Math.random().toString(36).slice(2)}`).toString("base64url");
+  // Include the employeeCode in the state payload so we know who is connecting
+  const statePayload = JSON.stringify({
+    nonce: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    employeeCode,
+  });
+  const state = Buffer.from(statePayload).toString("base64url");
+  
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: "openid email profile",
+    scope: "openid email profile https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events",
     access_type: "offline",
     prompt: "consent",
     state,
@@ -265,9 +274,9 @@ function buildCallbackPage(tokenPayload: unknown) {
 }
 
 export function registerGoogleCalendarRoutes(app: Express) {
-  app.get("/api/google/auth/url", async (_req: Request, res: Response) => {
+  app.get("/api/google/auth/url", async (req: Request, res: Response) => {
     try {
-      const result = buildGoogleAuthUrl(_req);
+      const result = buildGoogleAuthUrl(req);
       res.json({ url: result.url });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to create Google auth URL.";
@@ -292,6 +301,13 @@ export function registerGoogleCalendarRoutes(app: Express) {
 
   app.get("/api/google/auth/callback", async (req: Request, res: Response) => {
     const code = typeof req.query.code === "string" ? req.query.code : null;
+    const errorParam = typeof req.query.error === "string" ? req.query.error : null;
+
+    console.log("[google-callback] Received callback. code present:", !!code, "error:", errorParam);
+
+    if (errorParam) {
+      return res.status(400).send(`Google denied access: ${errorParam}`);
+    }
 
     if (!code) {
       return res.status(400).send("Missing Google authorization code.");
@@ -299,13 +315,73 @@ export function registerGoogleCalendarRoutes(app: Express) {
 
     try {
       const redirectUri = getGoogleRedirectUri(req);
+      console.log("[google-callback] Using redirectUri:", redirectUri);
       const tokens = await exchangeCodeForTokens(code, redirectUri);
+      console.log("[google-callback] Tokens obtained. accessToken present:", !!tokens.accessToken, "refreshToken present:", !!tokens.refreshToken);
+      
+      let employeeCode = "";
+      const stateStr = typeof req.query.state === "string" ? req.query.state : "";
+      if (stateStr) {
+        try {
+          const decoded = Buffer.from(stateStr, "base64url").toString("utf8");
+          const parsed = JSON.parse(decoded);
+          employeeCode = parsed.employeeCode || "";
+        } catch(e) {
+          console.error("[google-callback] Failed to decode state:", e);
+        }
+      }
+
+      console.log("[google-callback] Decoded employeeCode:", employeeCode || "(none)");
+
+      if (employeeCode) {
+        const pmsUserId = await resolvePmsUserId(employeeCode);
+        console.log("[google-callback] Resolved pmsUserId:", pmsUserId || "(not found)");
+
+        if (pmsUserId) {
+          // Fetch user info from Google to get the email
+          const userinfoResp = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+            headers: { Authorization: `Bearer ${tokens.accessToken}` }
+          });
+          let googleEmail = "unknown@google.com";
+          if (userinfoResp.ok) {
+            const userinfo = await userinfoResp.json();
+            googleEmail = userinfo.email || googleEmail;
+          } else {
+            console.error("[google-callback] userinfo fetch failed:", userinfoResp.status, await userinfoResp.text());
+          }
+
+          console.log("[google-callback] Google email:", googleEmail, " — saving to PMS DB...");
+
+          const expiryDate = new Date(tokens.expiresAt).toISOString();
+
+          await pmsPool.query(`
+            INSERT INTO google_calendar_accounts (
+              user_id, google_email, access_token, refresh_token, token_expiry, connected_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, NOW()
+            ) ON CONFLICT (user_id) DO UPDATE SET
+              google_email = EXCLUDED.google_email,
+              access_token = EXCLUDED.access_token,
+              refresh_token = COALESCE(EXCLUDED.refresh_token, google_calendar_accounts.refresh_token),
+              token_expiry = EXCLUDED.token_expiry,
+              connected_at = NOW()
+          `, [pmsUserId, googleEmail, tokens.accessToken, tokens.refreshToken, expiryDate]);
+
+          console.log("[google-callback] ✅ Saved to PMS DB successfully for userId:", pmsUserId);
+        } else {
+          console.warn("[google-callback] ⚠️ Could not resolve pmsUserId for employeeCode:", employeeCode, "— tokens NOT saved to PMS.");
+        }
+      } else {
+        console.warn("[google-callback] ⚠️ No employeeCode in state — tokens NOT saved to PMS DB.");
+      }
+
       res.send(buildCallbackPage({
         type: "GOOGLE_CALENDAR_CONNECTED",
         tokens,
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to complete Google authentication.";
+      console.error("[google-callback] ❌ Error:", message);
       res.status(500).send(message);
     }
   });

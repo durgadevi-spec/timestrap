@@ -54,7 +54,7 @@ export default function PlanForDayPage() {
   const getMaxDuration = (taskId: string): number => {
     if (taskId === 'break-morning' || taskId === 'break-evening') return 15; // 15 minutes max
     if (taskId === 'break-lunch') return 30; // 30 minutes max
-    return 240; // 240 minutes (4h) max for regular tasks
+    return 60; // 60 minutes (1h) max for regular tasks
   };
 
   const durationForRange = (start: string, end: string, taskId?: string) => {
@@ -80,6 +80,7 @@ export default function PlanForDayPage() {
 
       return {
         ...task,
+        instanceId: task.instanceId || `${task.id}-${Date.now()}-${index}`,
         order: index + 1,
         startTime,
         endTime,
@@ -119,11 +120,11 @@ export default function PlanForDayPage() {
     }
   };
 
-  const updateTaskSchedule = (taskId: string, field: 'startTime' | 'endTime' | 'extensionReason', value: string) => {
+  const updateTaskSchedule = (instanceId: string, field: 'startTime' | 'endTime' | 'extensionReason', value: string) => {
     setSelectedTasks(prev => buildScheduledTasks(prev.map(task => {
-      if (task.id !== taskId) return task;
+      if (task.instanceId !== instanceId) return task;
       const nextSchedule = { ...(task.scheduleData || {}), [field]: value };
-      const maxDuration = getMaxDuration(taskId);
+      const maxDuration = getMaxDuration(task.id);
 
       if (field === 'startTime' && nextSchedule.endTime) {
         const calculatedDuration = toMinutes(nextSchedule.endTime) - toMinutes(value);
@@ -137,7 +138,7 @@ export default function PlanForDayPage() {
             variant: 'destructive',
           });
         }
-        nextSchedule.durationMinutes = durationForRange(nextSchedule.startTime, nextSchedule.endTime, taskId);
+        nextSchedule.durationMinutes = durationForRange(nextSchedule.startTime, nextSchedule.endTime, task.id);
       }
       if (field === 'endTime' && nextSchedule.startTime) {
         const calculatedDuration = toMinutes(value) - toMinutes(nextSchedule.startTime);
@@ -153,7 +154,7 @@ export default function PlanForDayPage() {
         } else {
           nextSchedule.endTime = value;
         }
-        nextSchedule.durationMinutes = durationForRange(nextSchedule.startTime, nextSchedule.endTime, taskId);
+        nextSchedule.durationMinutes = durationForRange(nextSchedule.startTime, nextSchedule.endTime, task.id);
       }
 
       return {
@@ -165,38 +166,14 @@ export default function PlanForDayPage() {
     })));
   };
 
-  const extendTask = (taskId: string) => {
-    const target = selectedTasks.find(task => task.id === taskId);
-    const reason = target?.scheduleData?.extensionReason || '';
-
-    if (!reason.trim()) {
-      toast({ title: 'Extension Reason Required', description: 'Add a short reason before extending the task.', variant: 'destructive' });
-      return;
-    }
-
-    // Check if extension would exceed maximum duration
-    const maxDuration = getMaxDuration(taskId);
-    const currentEndMin = toMinutes(target?.endTime || '09:00');
-    const proposedEndMin = currentEndMin + 30;
-    const proposedDurationMin = proposedEndMin - toMinutes(target?.startTime || '09:00');
-    
-    if (proposedDurationMin > maxDuration) {
-      toast({
-        title: 'Cannot Extend',
-        description: `Extension would exceed the ${maxDuration}-minute limit for ${target?.task_name}. Current duration: ${target?.durationMinutes || 30}m, Max allowed: ${maxDuration}m`,
-        variant: 'destructive',
-      });
-      return;
-    }
-
+  const setTaskDuration = (instanceId: string, durationMin: number) => {
     setSelectedTasks(prev => buildScheduledTasks(prev.map(task => {
-      if (task.id !== taskId) return task;
-      const updatedEnd = toMinutes(task.endTime) + 30;
+      if (task.instanceId !== instanceId) return task;
+      const updatedEnd = toMinutes(task.startTime) + durationMin;
       const nextSchedule = {
         ...(task.scheduleData || {}),
         endTime: toTime(updatedEnd),
-        durationMinutes: durationForRange(task.startTime, toTime(updatedEnd), taskId),
-        extensionReason: reason,
+        durationMinutes: durationMin,
       };
 
       return {
@@ -206,13 +183,11 @@ export default function PlanForDayPage() {
         scheduleData: nextSchedule,
       };
     })));
-
-    toast({ title: 'Task Extended', description: `Task updated by 30 minutes. ${reason}` });
   };
 
-  const reorderTask = (taskId: string, direction: 'up' | 'down') => {
+  const reorderTask = (instanceId: string, direction: 'up' | 'down') => {
     setSelectedTasks(prev => {
-      const index = prev.findIndex(task => task.id === taskId);
+      const index = prev.findIndex(task => task.instanceId === instanceId);
       if (index < 0) return prev;
 
       const swapIndex = direction === 'up' ? index - 1 : index + 1;
@@ -486,21 +461,34 @@ export default function PlanForDayPage() {
     );
   }
 
-  const toggleTask = (task: any) => {
-    if (task.isLocked) {
+  const addTask = (task: any) => {
+    const count = selectedTasks.filter(t => t.id === task.id).length;
+    if (count >= 10) {
       toast({
-        title: 'Task Locked',
-        description: 'This is a PMS scheduled task and cannot be removed.',
+        title: 'Limit Reached',
+        description: 'You cannot select the same task more than 10 times.',
       });
       return;
     }
 
     setSelectedTasks(prev => {
-      const exists = prev.find(current => current.id === task.id);
-      if (exists) {
-        return buildScheduledTasks(prev.filter(current => current.id !== task.id));
+      // Always add as a new instance
+      const newTaskInstance = { ...task, instanceId: `${task.id}-${Date.now()}-${prev.length}` };
+      return buildScheduledTasks([...prev, newTaskInstance]);
+    });
+  };
+
+  const removeTask = (instanceId: string) => {
+    setSelectedTasks(prev => {
+      const task = prev.find(t => t.instanceId === instanceId);
+      if (task?.isLocked) {
+        toast({
+          title: 'Task Locked',
+          description: 'This is a PMS scheduled task and cannot be removed.',
+        });
+        return prev;
       }
-      return buildScheduledTasks([...prev, task]);
+      return buildScheduledTasks(prev.filter(current => current.instanceId !== instanceId));
     });
   };
 
@@ -736,15 +724,40 @@ export default function PlanForDayPage() {
                   )}
 
                   {filteredAvailableTasks.map((task: any) => {
-                    const isSelected = selectedTasks.find(current => current.id === task.id);
+                    const selectionCount = selectedTasks.filter(current => current.id === task.id).length;
+                    const isSelected = selectionCount > 0;
+                    const isLimitReached = selectionCount >= 10;
                     return (
-                      <motion.div key={task.id} className={`p-5 rounded-2xl border cursor-pointer flex items-center gap-4 ${isSelected ? 'bg-blue-600/20 border-blue-500/50' : 'bg-slate-800/40 border-slate-700/50'}`} onClick={() => toggleTask(task)}>
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${isSelected ? 'bg-blue-500 border-blue-400 text-white' : 'bg-slate-900 border-slate-800 text-slate-700'}`}>
-                          {isSelected ? <CheckCircle2 className="w-6 h-6" /> : <Circle className="w-6 h-6" />}
+                      <motion.div 
+                        key={task.id} 
+                        className={`p-5 rounded-2xl border flex items-center gap-4 transition-all ${
+                          isLimitReached 
+                            ? 'bg-slate-900/50 border-slate-800/30 opacity-50 cursor-not-allowed' 
+                            : isSelected 
+                              ? 'bg-blue-600/20 border-blue-500/50 cursor-pointer hover:bg-blue-600/30' 
+                              : 'bg-slate-800/40 border-slate-700/50 cursor-pointer hover:bg-slate-800/60'
+                        }`} 
+                        onClick={() => !isLimitReached && addTask(task)}
+                      >
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 ${
+                          isLimitReached
+                            ? 'bg-slate-800 border-slate-700 text-slate-600'
+                            : isSelected 
+                              ? 'bg-blue-500 border-blue-400 text-white' 
+                              : 'bg-slate-900 border-slate-800 text-slate-700'
+                        }`}>
+                          {isLimitReached ? <AlertTriangle className="w-5 h-5" /> : (isSelected ? <span className="font-black text-sm">{selectionCount}</span> : <Circle className="w-6 h-6" />)}
                         </div>
-                        <div>
-                          <h3 className="font-bold text-slate-100">{task.task_name}</h3>
-                          <p className="text-xs text-slate-500 font-bold uppercase">{task.projectName}</p>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-bold text-slate-100 truncate flex items-center gap-2">
+                            {task.task_name}
+                            {isSelected && !isLimitReached && (
+                              <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full whitespace-nowrap">
+                                {selectionCount} / 10
+                              </span>
+                            )}
+                          </h3>
+                          <p className="text-xs text-slate-500 font-bold uppercase truncate">{task.projectName}</p>
                         </div>
                       </motion.div>
                     );
@@ -775,7 +788,7 @@ export default function PlanForDayPage() {
                   )}
 
                   {filteredSelectedTasks.map((task: any, index: number) => (
-                    <div key={task.id} className="rounded-2xl border border-blue-500/20 bg-slate-950/60 p-4 space-y-3">
+                    <div key={task.instanceId} className="rounded-2xl border border-blue-500/20 bg-slate-950/60 p-4 space-y-3">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-[10px] uppercase text-blue-400 font-black">#{index + 1} • {task.isAutoSelected ? 'PMS Sync' : 'Manual'}</p>
@@ -783,10 +796,10 @@ export default function PlanForDayPage() {
                           <p className="text-xs text-slate-400 uppercase">{task.projectName}</p>
                         </div>
                         <div className="flex gap-2">
-                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-800" onClick={() => reorderTask(task.id, 'up')} disabled={index === 0}><ArrowUp className="w-4 h-4" /></Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-800" onClick={() => reorderTask(task.id, 'down')} disabled={index === selectedTasks.length - 1}><ArrowDown className="w-4 h-4" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-800" onClick={() => reorderTask(task.instanceId, 'up')} disabled={index === 0}><ArrowUp className="w-4 h-4" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-800" onClick={() => reorderTask(task.instanceId, 'down')} disabled={index === selectedTasks.length - 1}><ArrowDown className="w-4 h-4" /></Button>
                           {!task.isAutoSelected && (
-                            <Button variant="ghost" size="sm" onClick={() => toggleTask(task)} className="text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-xl">Cancel</Button>
+                            <Button variant="ghost" size="sm" onClick={() => removeTask(task.instanceId)} className="text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-xl">Cancel</Button>
                           )}
                         </div>
                       </div>
@@ -794,25 +807,31 @@ export default function PlanForDayPage() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div>
                           <label className="text-[10px] uppercase text-slate-400 font-bold">Start</label>
-                          <Input type="time" value={task.startTime} onChange={(e) => updateTaskSchedule(task.id, 'startTime', e.target.value)} className="bg-slate-950 border-slate-800" />
+                          <Input type="time" value={task.startTime} onChange={(e) => updateTaskSchedule(task.instanceId, 'startTime', e.target.value)} className="bg-slate-950 border-slate-800" />
                         </div>
                         <div>
                           <label className="text-[10px] uppercase text-slate-400 font-bold">End</label>
-                          <Input type="time" value={task.endTime} onChange={(e) => updateTaskSchedule(task.id, 'endTime', e.target.value)} className="bg-slate-950 border-slate-800" />
+                          <Input type="time" value={task.endTime} onChange={(e) => updateTaskSchedule(task.instanceId, 'endTime', e.target.value)} className="bg-slate-950 border-slate-800" />
                         </div>
                       </div>
 
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <p className="text-[10px] uppercase text-slate-500 font-bold">Duration</p>
-                          <p className="text-sm font-black text-blue-300">{Math.max(30, task.durationMinutes || 30)} minutes</p>
+                          <p className="text-sm font-black text-blue-300">{Math.max(15, task.durationMinutes || 30)} minutes</p>
                         </div>
-                        <Button type="button" size="sm" variant="outline" className="rounded-xl border-blue-500/30 text-blue-300" onClick={() => extendTask(task.id)}>Extend +30m</Button>
+                        {!task.isBreak && (
+                          <div className="flex gap-1">
+                            <Button type="button" size="sm" variant="outline" className={`rounded-xl border-blue-500/30 text-xs px-2 h-7 ${task.durationMinutes === 30 ? 'bg-blue-600 text-white' : 'text-blue-300 hover:bg-blue-500/20'}`} onClick={() => setTaskDuration(task.instanceId, 30)}>30m</Button>
+                            <Button type="button" size="sm" variant="outline" className={`rounded-xl border-blue-500/30 text-xs px-2 h-7 ${task.durationMinutes === 45 ? 'bg-blue-600 text-white' : 'text-blue-300 hover:bg-blue-500/20'}`} onClick={() => setTaskDuration(task.instanceId, 45)}>45m</Button>
+                            <Button type="button" size="sm" variant="outline" className={`rounded-xl border-blue-500/30 text-xs px-2 h-7 ${task.durationMinutes === 60 ? 'bg-blue-600 text-white' : 'text-blue-300 hover:bg-blue-500/20'}`} onClick={() => setTaskDuration(task.instanceId, 60)}>1h</Button>
+                          </div>
+                        )}
                       </div>
 
                       <div>
                         <label className="text-[10px] uppercase text-slate-400 font-bold">Extension Reason</label>
-                        <Input placeholder="Optional reason for extension" value={task.scheduleData?.extensionReason || ''} onChange={(e) => updateTaskSchedule(task.id, 'extensionReason', e.target.value)} className="bg-slate-950 border-slate-800" />
+                        <Input placeholder="Optional reason for extension" value={task.scheduleData?.extensionReason || ''} onChange={(e) => updateTaskSchedule(task.instanceId, 'extensionReason', e.target.value)} className="bg-slate-950 border-slate-800" />
                       </div>
                     </div>
                   ))}

@@ -696,9 +696,9 @@ export async function registerRoutes(
   // edited/dragged/deleted on the Calendar page.
   app.post("/api/calendar-events/plan-sync", async (req, res) => {
     try {
-      const { employeeCode, taskId, title, project, date, startTime, endTime } = req.body;
-      if (!employeeCode || !taskId) return res.status(400).json({ error: "employeeCode and taskId are required" });
-      const synced = await upsertPmsPlanCalendarEvent(employeeCode, { taskId, title, project, date, startTime, endTime });
+      const payload = req.body;
+      if (!payload.employeeCode || !payload.taskId) return res.status(400).json({ error: "employeeCode and taskId are required" });
+      const synced = await upsertPmsPlanCalendarEvent(payload.employeeCode, payload);
       res.json(synced);
     } catch (error) {
       console.error("Plan calendar sync error:", error);
@@ -2327,7 +2327,13 @@ export async function registerRoutes(
       }
 
       const tasks = await storage.getPlanTasks(plan.id);
-      res.json({ submitted: true, plan, tasks });
+      const { toTaskUuid } = await import("./Pmscalendarevents");
+      const enhancedTasks = tasks.map(t => ({
+        ...t,
+        hashedTaskId: toTaskUuid(t.taskId)
+      }));
+
+      res.json({ submitted: true, plan, tasks: enhancedTasks });
     } catch (error) {
       console.error("Get today's plan error:", error);
       res.status(500).json({ error: "Failed to fetch today's plan" });
@@ -2344,6 +2350,12 @@ export async function registerRoutes(
       }
 
       const tasks = await storage.getPlanTasks(plan.id);
+      const { toTaskUuid } = await import("./Pmscalendarevents");
+      const enhancedTasks = tasks.map(t => ({
+        ...t,
+        hashedTaskId: toTaskUuid(t.taskId)
+      }));
+
       // Fetch postponements for this employee on this specific date
       const postponements = await pool.query(
         `SELECT task_name, reason, new_due_date FROM task_postponements WHERE postponed_by = $1 AND DATE(postponed_at) = $2::date`,
@@ -2353,7 +2365,7 @@ export async function registerRoutes(
       res.json({
         submitted: true,
         plan,
-        tasks,
+        tasks: enhancedTasks,
         postponedTasks: postponements.rows || []
       });
     } catch (error) {

@@ -5,10 +5,10 @@ import {
   isSameDay, isSameMonth,
 } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
-import {
+import { 
+  fetchGoogleStatus, 
   disconnectGoogle as disconnectPmsGoogle,
-  fetchGoogleStatus,
-  getPmsGoogleConnectUrl,
+  type GoogleStatus 
 } from "@/lib/googleCalendar";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -57,6 +57,7 @@ interface CalendarEvent {
   reminders?: number[];
   visibility?: "default" | "public" | "private";
   busy?: boolean;
+  projectId?: string;
 }
 
 interface ModalState {
@@ -324,6 +325,8 @@ const toApiEventBody = (employeeCode: string, event: Partial<CalendarEvent>) => 
   guestsCanModify: event.guestsCanModify || false,
   guestsCanInvite: event.guestsCanInvite !== false,
   guestsCanSeeGuestList: event.guestsCanSeeGuestList !== false,
+  projectId: event.projectId,
+  taskId: event.pmsId,
 });
 
 const fromApiEvent = (row: any): CalendarEvent => ({
@@ -335,7 +338,7 @@ const fromApiEvent = (row: any): CalendarEvent => ({
   startTime: row.startTime,
   endTime: row.endTime,
   colorIdx: row.colorIdx ?? 0,
-  source: "manual",
+  source: row.source === "plan" ? "plan" : "manual",
   googleEventId: row.googleEventId || undefined,
   description: row.description || "",
   location: row.location || "",
@@ -346,6 +349,9 @@ const fromApiEvent = (row: any): CalendarEvent => ({
   reminders: Array.isArray(row.reminders) ? row.reminders : [30],
   visibility: row.visibility || "default",
   busy: row.busy !== false,
+  projectId: row.projectId,
+  pmsId: row.pmsId || row.taskId,
+  guests: Array.isArray(row.guests) ? row.guests : [],
 });
 
 const fetchManualEvents = async (employeeCode: string, date: string): Promise<CalendarEvent[]> => {
@@ -431,13 +437,9 @@ const syncPlanEventToPms = async (employeeCode: string | undefined, event: Calen
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...event,
         employeeCode,
-        taskId: event.pmsId,
-        title: event.title,
-        project: event.project,
-        date: event.date,
-        startTime: event.startTime,
-        endTime: event.endTime,
+        taskId: event.pmsId, // The backend expects `taskId` (which corresponds to `pmsId` in frontend)
       }),
     });
   } catch (err) {
@@ -1279,7 +1281,7 @@ function EventModal({ event, onClose, onSave, onDelete, mode, user }: EventModal
               <button
                 onClick={() => onSave({
                   id: event?.id || String(Date.now()),
-                  title, project, date, endDate, startTime: start, endTime: end, colorIdx,
+                  title, project, projectId: selectedProjectId, date, endDate, startTime: start, endTime: end, colorIdx,
                   source: event?.source || "manual",
                   pmsId: selectedTask?.id || event?.pmsId,
                   guests, guestsCanModify, guestsCanInvite, guestsCanSeeGuestList,
@@ -1350,25 +1352,33 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
           console.error("Failed to load manual calendar events from PMS:", err);
         }
 
+        // Filter out plan tasks that have already been synced to the DB,
+        // because the DB version (in manualEvents) has the true up-to-date times.
+        const dbPlanPmsIds = new Set(manualEvents.map(e => e.pmsId).filter(Boolean));
+
         const scheduleKey = `plan_schedule_${user?.id}_${targetDate}`;
         const scheduleTasks = readStoredArray(scheduleKey);
-        const legacyPlanTasks = readStoredArray(`pendingTasks_${user?.id}_${targetDate}`).filter(isPlanTask).map((t: any) => {
-          let scheduleData: any = {};
-          try {
-            scheduleData = typeof t.scheduleData === 'string' ? JSON.parse(t.scheduleData) : (t.scheduleData || {});
-          } catch (e) { }
-          return {
-            ...t,
-            startTime: scheduleData.startTime || t.startTime || "09:00",
-            endTime: scheduleData.endTime || t.endTime || "10:00",
-          };
-        });
+        const legacyPlanTasks = readStoredArray(`pendingTasks_${user?.id}_${targetDate}`).filter(isPlanTask)
+          .filter((t: any) => !dbPlanPmsIds.has(t.taskId || t.id))
+          .map((t: any) => {
+            let scheduleData: any = {};
+            try {
+              scheduleData = typeof t.scheduleData === 'string' ? JSON.parse(t.scheduleData) : (t.scheduleData || {});
+            } catch (e) { }
+            return {
+              ...t,
+              startTime: scheduleData.startTime || t.startTime || "09:00",
+              endTime: scheduleData.endTime || t.endTime || "10:00",
+            };
+          });
 
         // Use server tasks if available, otherwise fallback to local storage
         let basePlanTasks = legacyPlanTasks;
         if (serverPlanTasks.length > 0) {
-          basePlanTasks = serverPlanTasks.map((st: any) => {
-            const taskId = st.taskId || st.id;
+          basePlanTasks = serverPlanTasks
+            .filter((st: any) => !dbPlanPmsIds.has(st.hashedTaskId || st.taskId || st.id))
+            .map((st: any) => {
+            const taskId = st.hashedTaskId || st.taskId || st.id;
             const localMatch = scheduleTasks.find((lt: any) => lt.pmsId === taskId || lt.id === taskId);
 
             // Extract timings safely from scheduleData or fallbacks
@@ -1379,11 +1389,8 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
 
             // localMatch reflects the most recent edit made directly on the Calendar
             // page (drag-to-move, resize, etc.) and is kept in `plan_schedule_*`
-            // localStorage by persistPlanUpdate(). It must win over `scheduleData`,
-            // which is just a frozen snapshot of whatever the plan looked like at
-            // submission time — otherwise every refresh reverts a dragged/resized
-            // event (including the Lunch/Morning/Evening break slots) back to its
-            // original submitted time.
+            // localStorage by persistPlanUpdate(). It is used here only as a fallback
+            // for events that haven't made it to the DB yet.
             const startTime = (localMatch as any)?.startTime || scheduleData.startTime || st.startTime || "09:00";
             const endTime = (localMatch as any)?.endTime || scheduleData.endTime || st.endTime || "10:00";
 
@@ -1397,7 +1404,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
             };
           });
         } else if (scheduleTasks.length > 0) {
-          basePlanTasks = scheduleTasks;
+          basePlanTasks = scheduleTasks.filter((st: any) => !dbPlanPmsIds.has(st.pmsId || st.id));
         }
 
         const planEvents = mergePlanEvents(basePlanTasks, targetDate);
@@ -1572,22 +1579,32 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
   // Google Calendar is owned by PMS. Connecting has to happen on PMS's
   // server (it holds the OAuth secret), so this just sends the user there.
   // After they come back, poll our own read-only status a few times to
-  // pick up the change.
-  const connectGoogleCalendar = () => {
+  const connectGoogleCalendar = async () => {
     if (!user?.employeeCode) {
       setGoogleStatus("Sign in to connect Google Calendar.");
       return;
     }
 
     try {
-      const connectUrl = getPmsGoogleConnectUrl(user.employeeCode);
-      const popup = window.open(connectUrl, "pms-google-calendar", "width=520,height=700");
+      // Open a blank popup immediately to prevent popup blockers
+      const popup = window.open("about:blank", "google-calendar", "width=520,height=700");
       if (!popup) {
         setGoogleStatus("Popup blocked. Please allow popups and try again.");
         return;
       }
 
       setGoogleStatus("Waiting for Google authorization...");
+
+      // Fetch the actual OAuth URL from Timestrap backend
+      const res = await fetch(`/api/google/auth/url?employeeCode=${encodeURIComponent(user.employeeCode)}`);
+      if (!res.ok) {
+        throw new Error("Failed to get Google Auth URL");
+      }
+      const data = await res.json();
+      
+      // Redirect the popup to Google
+      popup.location.href = data.url;
+
       const poll = window.setInterval(() => {
         if (popup.closed) {
           window.clearInterval(poll);

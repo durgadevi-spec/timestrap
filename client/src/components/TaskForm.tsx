@@ -310,17 +310,29 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
     fetchTasks();
   }, [formData.project, projects]);
 
-  // Update pmsId when task changes
+  // Update pmsId and auto-select keyStep when task changes
   useEffect(() => {
     if (formData.title) {
       const selectedTask = tasks.find(t => t.task_name === formData.title);
-      if (selectedTask && selectedTask.id !== formData.pmsId) {
-        setFormData(prev => ({ ...prev, pmsId: selectedTask.id }));
+      if (selectedTask) {
+        const updates: Partial<typeof formData> = {};
+        if (selectedTask.id !== formData.pmsId) updates.pmsId = selectedTask.id;
+        // Auto-select the key step that belongs to this task
+        if ((selectedTask as any).key_step_id) {
+          const matchedKeyStep = keySteps.find(k => k.id === (selectedTask as any).key_step_id);
+          if (matchedKeyStep && matchedKeyStep.name !== formData.keyStep) {
+            updates.keyStep = matchedKeyStep.name;
+          }
+        } else {
+          // Task has no key_step_id — clear the key step selection, but ONLY if we aren't editing an existing entry that already had one
+          if (formData.keyStep && !task?.keyStep) updates.keyStep = '';
+        }
+        if (Object.keys(updates).length > 0) setFormData(prev => ({ ...prev, ...updates }));
       }
     }
-  }, [formData.title, tasks]);
+  }, [formData.title, tasks, keySteps, task?.keyStep]);
 
-  /* ✅ ADDED – fetch key steps for project from PMS */
+  /* ✅ fetch key steps for project from PMS, then filter by selected task */
   useEffect(() => {
     async function fetchKeySteps() {
       if (!formData.project) {
@@ -340,8 +352,18 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
         const json = await res.json();
         if (Array.isArray(json)) {
           // accept both {id,name} or simple strings
-          const mapped = json.map((k: any) => (typeof k === 'string' ? { id: k, name: k } : { id: k.id || k.key || k.name, name: k.name || k.key || String(k) }));
-          setKeySteps(mapped);
+          const allMapped = json.map((k: any) => (typeof k === 'string' ? { id: k, name: k } : { id: k.id || k.key || k.name, name: k.name || k.key || String(k) }));
+
+          // If a task is selected and it has a key_step_id, only show that key step
+          const selectedTask = formData.title ? tasks.find(t => t.task_name === formData.title) : null;
+          const taskKeyStepId = (selectedTask as any)?.key_step_id;
+
+          if (taskKeyStepId) {
+            const filtered = allMapped.filter(k => k.id === taskKeyStepId);
+            setKeySteps(filtered.length > 0 ? filtered : allMapped);
+          } else {
+            setKeySteps(allMapped);
+          }
         } else {
           setKeySteps([]);
         }
@@ -351,7 +373,7 @@ export default function TaskForm({ task, onSave, onCancel, user, saveButtonText,
       }
     }
     fetchKeySteps();
-  }, [formData.project, projects]);
+  }, [formData.project, formData.title, tasks, projects]);
 
   useEffect(() => {
     async function fetchSubtasks() {

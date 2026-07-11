@@ -299,6 +299,7 @@ export class DatabaseStorage implements IStorage {
         id: pmsTask.id,
         project_code: pmsTask.project_id, // Map project_id to project_code
         task_name: pmsTask.task_name,
+        key_step_id: pmsTask.key_step_id,
         createdAt: pmsTask.created_at ? new Date(pmsTask.created_at) : new Date(),
       }));
     } catch (error) {
@@ -339,6 +340,7 @@ export class DatabaseStorage implements IStorage {
         id: pmsTask.id,
         project_code: pmsTask.project_id, // Map project_id to project_code
         task_name: pmsTask.task_name,
+        key_step_id: pmsTask.key_step_id,
         createdAt: pmsTask.created_at ? new Date(pmsTask.created_at) : new Date(),
       }));
     } catch (error) {

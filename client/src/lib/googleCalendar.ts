@@ -36,16 +36,4 @@ export async function disconnectGoogle(employeeCode?: string): Promise<void> {
     throw new Error("Unable to disconnect Google Calendar.");
   }
 }
-
-// PMS's server is the only thing that can start the OAuth flow (it holds
-// the Google client secret). This just builds the URL to send the user to.
-// Set VITE_PMS_APP_URL to PMS's public base URL (e.g. https://pms.example.com).
-export function getPmsGoogleConnectUrl(employeeCode?: string): string {
-  const pmsBaseUrl = (import.meta as any).env?.VITE_PMS_APP_URL || "";
-  if (!pmsBaseUrl) {
-    throw new Error(
-      "VITE_PMS_APP_URL is not configured — set it to PMS's public URL to enable connecting Google Calendar."
-    );
-  }
-  return `${pmsBaseUrl.replace(/\/$/, "")}/api/google/connect`;
-}
+
