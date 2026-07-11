@@ -167,6 +167,10 @@ async function buildInsertPayload(evt: Partial<PmsCalendarEvent> = {}) {
     }
   }
 
+  // Strip non-UUID project_id / task_id — PMS's columns are real uuid types
+  if (values.project_id && !UUID_RE.test(values.project_id)) delete values.project_id;
+  if (values.task_id && !UUID_RE.test(values.task_id)) values.task_id = toTaskUuid(values.task_id);
+
   if (columns.has("metadata") && Object.prototype.hasOwnProperty.call(payload, "metadata")) values.metadata = payload.metadata;
   if (columns.has("event_metadata") && Object.prototype.hasOwnProperty.call(payload, "metadata")) values.event_metadata = payload.metadata;
   return values;
@@ -188,6 +192,10 @@ async function buildUpdatePayload(evt: Partial<PmsCalendarEvent> = {}) {
       values[col] = payload[col];
     }
   }
+
+  // Strip non-UUID project_id / task_id — PMS's columns are real uuid types
+  if (values.project_id && !UUID_RE.test(values.project_id)) delete values.project_id;
+  if (values.task_id && !UUID_RE.test(values.task_id)) values.task_id = toTaskUuid(values.task_id);
 
   if (columns.has("metadata") && Object.prototype.hasOwnProperty.call(payload, "metadata")) values.metadata = payload.metadata;
   if (columns.has("event_metadata") && Object.prototype.hasOwnProperty.call(payload, "metadata")) values.event_metadata = payload.metadata;

@@ -604,28 +604,98 @@ function DayColumn({ day, events, onSlotClick, onEventClick, onEventResize, onDr
           onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = dragOverHour === hour ? "#e8f0ff" : ""; }}
         />
       ))}
-      {events.map((evt) => {
-        const startMin = toMin(evt.startTime);
-        const baseEndMin = Math.max(startMin + 15, toMin(evt.endTime));
-        const isResizingThis = resizing?.id === evt.id;
-        const liveEndMin = isResizingThis
-          ? Math.max(startMin + MIN_EVENT_MIN, Math.min(23 * 60 + 59, baseEndMin + resizing.deltaMin))
-          : baseEndMin;
-        const topOffset = ((startMin - START_HOUR * 60) / 60) * SLOT_H;
-        const height = Math.max(20, ((liveEndMin - startMin) / 60) * SLOT_H - 2);
-        return (
-          <EventPill
-            key={evt.id}
-            event={evt}
-            onClick={onEventClick}
-            compact={false}
-            onDragStart={isResizingThis ? undefined : onDragStart}
-            onDragEnd={() => onDragEnd?.()}
-            onResizeStart={onEventResize ? (e) => setResizing({ id: evt.id, startY: e.clientY, startMin, origEndMin: baseEndMin, deltaMin: 0 }) : undefined}
-            style={{ position: "absolute", left: 2, right: 2, top: topOffset, height, zIndex: isResizingThis ? 20 : 1 }}
-          />
-        );
-      })}
+      {(() => {
+        // ── Column layout algorithm (Google Calendar-style side-by-side) ──
+        // 1. Build a list of event rects with their time ranges
+        type EvtRect = { evt: CalendarEvent; startMin: number; endMin: number };
+        const rects: EvtRect[] = events
+          .map((evt) => {
+            const startMin = toMin(evt.startTime);
+            const baseEndMin = Math.max(startMin + 15, toMin(evt.endTime));
+            const isResizingThis = resizing?.id === evt.id;
+            const endMin = isResizingThis
+              ? Math.max(startMin + MIN_EVENT_MIN, Math.min(23 * 60 + 59, baseEndMin + resizing.deltaMin))
+              : baseEndMin;
+            return { evt, startMin, endMin };
+          })
+          .sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+
+        // 2. Group overlapping events into clusters
+        type Cluster = { rects: EvtRect[]; columns: Map<string, number>; maxCol: number };
+        const clusters: Cluster[] = [];
+        for (const rect of rects) {
+          // Try to add to the last cluster if it overlaps
+          const last = clusters[clusters.length - 1];
+          if (last && last.rects.some((r) => r.startMin < rect.endMin && rect.startMin < r.endMin)) {
+            last.rects.push(rect);
+          } else {
+            clusters.push({ rects: [rect], columns: new Map(), maxCol: 0 });
+          }
+        }
+
+        // 3. Assign columns within each cluster
+        for (const cluster of clusters) {
+          const columnEnds: number[] = []; // tracks the end-time of each column
+          for (const rect of cluster.rects) {
+            // Find the first column where this event fits (i.e., doesn't overlap)
+            let placed = false;
+            for (let col = 0; col < columnEnds.length; col++) {
+              if (columnEnds[col] <= rect.startMin) {
+                columnEnds[col] = rect.endMin;
+                cluster.columns.set(rect.evt.id, col);
+                placed = true;
+                break;
+              }
+            }
+            if (!placed) {
+              cluster.columns.set(rect.evt.id, columnEnds.length);
+              columnEnds.push(rect.endMin);
+            }
+          }
+          cluster.maxCol = columnEnds.length;
+        }
+
+        // 4. Build a lookup from event id → { col, totalCols }
+        const layout = new Map<string, { col: number; totalCols: number }>();
+        for (const cluster of clusters) {
+          for (const rect of cluster.rects) {
+            layout.set(rect.evt.id, {
+              col: cluster.columns.get(rect.evt.id) || 0,
+              totalCols: cluster.maxCol,
+            });
+          }
+        }
+
+        // 5. Render with computed widths and positions
+        return rects.map(({ evt, startMin, endMin }) => {
+          const isResizingThis = resizing?.id === evt.id;
+          const topOffset = ((startMin - START_HOUR * 60) / 60) * SLOT_H;
+          const height = Math.max(20, ((endMin - startMin) / 60) * SLOT_H - 2);
+          const { col, totalCols } = layout.get(evt.id) || { col: 0, totalCols: 1 };
+          const widthPercent = 100 / totalCols;
+          const leftPercent = col * widthPercent;
+
+          return (
+            <EventPill
+              key={evt.id}
+              event={evt}
+              onClick={onEventClick}
+              compact={false}
+              onDragStart={isResizingThis ? undefined : onDragStart}
+              onDragEnd={() => onDragEnd?.()}
+              onResizeStart={onEventResize ? (e) => setResizing({ id: evt.id, startY: e.clientY, startMin, origEndMin: endMin, deltaMin: 0 }) : undefined}
+              style={{
+                position: "absolute",
+                left: `calc(${leftPercent}% + 1px)`,
+                width: `calc(${widthPercent}% - 3px)`,
+                top: topOffset,
+                height,
+                zIndex: isResizingThis ? 20 : 1,
+              }}
+            />
+          );
+        });
+      })()}
     </div>
   );
 }
@@ -1470,12 +1540,42 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
   };
 
   const openNew = (date: Date, hour: number): void => {
+    const dateStr = format(date, "yyyy-MM-dd");
+    const slotStartMin = hour * 60;
+    const slotEndMin = (hour + 1) * 60;
+
+    // Find events on the same day that overlap with or end within this slot
+    const dayEvents = events.filter((e) => e.date === dateStr);
+
+    // Find the latest event end-time that falls within or overlaps the clicked slot.
+    // An event overlaps this slot if it starts before the slot ends AND ends after
+    // the slot starts (i.e., it occupies any portion of this hour).
+    let smartStartMin = slotStartMin;
+    for (const evt of dayEvents) {
+      const evtStart = toMin(evt.startTime);
+      const evtEnd = toMin(evt.endTime);
+      // Event overlaps this slot if it starts before slot end AND ends after slot start
+      if (evtStart < slotEndMin && evtEnd > slotStartMin) {
+        // The new event should start after this event ends
+        if (evtEnd > smartStartMin && evtEnd <= slotEndMin) {
+          smartStartMin = evtEnd;
+        }
+      }
+    }
+
+    // Calculate end time: default 30 minutes, capped at slot boundary or +60m
+    const defaultDurationMin = 30;
+    const smartEndMin = Math.min(23 * 60 + 59, smartStartMin + defaultDurationMin);
+
+    const startTime = `${String(Math.floor(smartStartMin / 60)).padStart(2, "0")}:${String(smartStartMin % 60).padStart(2, "0")}`;
+    const endTime = `${String(Math.floor(smartEndMin / 60)).padStart(2, "0")}:${String(smartEndMin % 60).padStart(2, "0")}`;
+
     setModal({
       mode: "new",
       event: {
-        date: format(date, "yyyy-MM-dd"),
-        startTime: `${String(hour).padStart(2, "0")}:00`,
-        endTime: `${String(hour + 1).padStart(2, "0")}:00`,
+        date: dateStr,
+        startTime,
+        endTime,
         colorIdx: 0,
         source: "manual",
       },
