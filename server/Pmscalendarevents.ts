@@ -30,15 +30,10 @@
 // poller) picks them up.
 
 import { pmsPool } from "./pmsSupabase";
+import crypto from "crypto";
 
-async function resolvePmsUserId(employeeCode: string): Promise<string | null> {
-  if (!employeeCode) return null;
-  const result = await pmsPool.query(
-    `SELECT u.id FROM users u JOIN employees e ON u.employee_id = e.id WHERE e.emp_code = $1 LIMIT 1`,
-    [employeeCode]
-  );
-  return result.rows[0]?.id || null;
-}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CALENDAR_EVENT_COLUMN_CACHE = new Map<string, Set<string>>();
 
 export interface PmsCalendarEvent {
   id: string;
@@ -53,6 +48,210 @@ export interface PmsCalendarEvent {
   googleEventId?: string | null;
   source: "manual" | "plan";
   pmsId?: string; // task_id, present for 'task' rows
+  description?: string;
+  location?: string;
+  videoLink?: string;
+  allDay?: boolean;
+  calendarType?: string;
+  repeat?: string;
+  reminders?: number[];
+  visibility?: string;
+  busy?: boolean;
+  guestsCanModify?: boolean;
+  guestsCanInvite?: boolean;
+  guestsCanSeeGuestList?: boolean;
+  guests?: any[];
+}
+
+async function getCalendarEventColumns(): Promise<Set<string>> {
+  const cached = CALENDAR_EVENT_COLUMN_CACHE.get("calendar_events");
+  if (cached) return cached;
+
+  const result = await pmsPool.query(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = $1 ORDER BY ordinal_position`,
+    ["calendar_events"]
+  );
+  const columns = new Set(result.rows.map((row: any) => String(row.column_name)));
+  CALENDAR_EVENT_COLUMN_CACHE.set("calendar_events", columns);
+  return columns;
+}
+
+function parseReminders(value: unknown): number[] | undefined {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is number => typeof item === "number" && Number.isFinite(item));
+  }
+  if (typeof value === "string") {
+    const parsed = value.split(",").map((item) => Number(item.trim())).filter((item) => Number.isFinite(item));
+    return parsed.length > 0 ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function normalizeVisibility(value: unknown): PmsCalendarEvent["visibility"] {
+  if (value === "public" || value === "private") return value;
+  return "default";
+}
+
+function normalizeBusy(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    if (normalized === "false") return false;
+    if (normalized === "true") return true;
+  }
+  return undefined;
+}
+
+function parseMetadata(value: unknown): Record<string, any> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof value === "object") {
+    return value as Record<string, any>;
+  }
+  return {};
+}
+
+export function buildCalendarEventMetadata(evt: Partial<PmsCalendarEvent> = {}) {
+  return {
+    description: evt.description ?? "",
+    location: evt.location ?? "",
+    videoLink: evt.videoLink ?? "",
+    allDay: !!evt.allDay,
+    calendarType: evt.calendarType || "meeting",
+    repeat: evt.repeat || "none",
+    reminders: evt.reminders ?? [30],
+    visibility: evt.visibility || "default",
+    busy: evt.busy !== false,
+  };
+}
+
+export function serializeCalendarEventDbValues(evt: Partial<PmsCalendarEvent> = {}, includeDefaults: boolean = true) {
+  const payload: Record<string, any> = {};
+  const hasField = (fieldName: string) => includeDefaults || Object.prototype.hasOwnProperty.call(evt, fieldName);
+
+  if (hasField("description")) payload.description = evt.description ?? "";
+  if (hasField("location")) payload.location = evt.location ?? "";
+  if (hasField("videoLink")) payload.video_link = evt.videoLink ?? "";
+  if (hasField("allDay")) payload.all_day = evt.allDay ?? false;
+  if (hasField("repeat")) payload.repeat = evt.repeat || "none";
+  if (hasField("reminders")) payload.reminders = Array.isArray(evt.reminders) ? evt.reminders : (evt.reminders ? [evt.reminders] : []);
+  if (hasField("visibility")) payload.visibility = evt.visibility || "default";
+  if (hasField("busy")) payload.busy = evt.busy !== false;
+  if (hasField("guestsCanModify")) payload.guests_can_modify = !!evt.guestsCanModify;
+  if (hasField("guestsCanInvite")) payload.guests_can_invite = evt.guestsCanInvite !== false;
+  if (hasField("guestsCanSeeGuestList")) payload.guests_can_see_guest_list = evt.guestsCanSeeGuestList !== false;
+  if (hasField("guests")) payload.guests = Array.isArray(evt.guests) ? evt.guests : [];
+  payload.metadata = buildCalendarEventMetadata(evt);
+  return payload;
+}
+
+async function buildInsertPayload(evt: Partial<PmsCalendarEvent> = {}) {
+  const columns = await getCalendarEventColumns();
+  const payload = serializeCalendarEventDbValues(evt, true);
+  const values: Record<string, any> = {};
+
+  if (columns.has("description") && Object.prototype.hasOwnProperty.call(payload, "description")) values.description = payload.description;
+  if (columns.has("location") && Object.prototype.hasOwnProperty.call(payload, "location")) values.location = payload.location;
+  if (columns.has("video_link") && Object.prototype.hasOwnProperty.call(payload, "video_link")) values.video_link = payload.video_link;
+  if (columns.has("all_day") && Object.prototype.hasOwnProperty.call(payload, "all_day")) values.all_day = payload.all_day;
+  if (columns.has("repeat") && Object.prototype.hasOwnProperty.call(payload, "repeat")) values.repeat = payload.repeat;
+  if (columns.has("reminders") && Object.prototype.hasOwnProperty.call(payload, "reminders")) values.reminders = payload.reminders;
+  if (columns.has("visibility") && Object.prototype.hasOwnProperty.call(payload, "visibility")) values.visibility = payload.visibility;
+  if (columns.has("busy") && Object.prototype.hasOwnProperty.call(payload, "busy")) values.busy = payload.busy;
+  if (columns.has("guests_can_modify") && Object.prototype.hasOwnProperty.call(payload, "guests_can_modify")) values.guests_can_modify = payload.guests_can_modify;
+  if (columns.has("guests_can_invite") && Object.prototype.hasOwnProperty.call(payload, "guests_can_invite")) values.guests_can_invite = payload.guests_can_invite;
+  if (columns.has("guests_can_see_guest_list") && Object.prototype.hasOwnProperty.call(payload, "guests_can_see_guest_list")) values.guests_can_see_guest_list = payload.guests_can_see_guest_list;
+  if (columns.has("guests") && Object.prototype.hasOwnProperty.call(payload, "guests")) values.guests = payload.guests;
+  if (columns.has("metadata") && Object.prototype.hasOwnProperty.call(payload, "metadata")) values.metadata = payload.metadata;
+  if (columns.has("event_metadata") && Object.prototype.hasOwnProperty.call(payload, "metadata")) values.event_metadata = payload.metadata;
+  return values;
+}
+
+async function buildUpdatePayload(evt: Partial<PmsCalendarEvent> = {}) {
+  const columns = await getCalendarEventColumns();
+  const payload = serializeCalendarEventDbValues(evt, false);
+  const values: Record<string, any> = {};
+
+  if (columns.has("description") && Object.prototype.hasOwnProperty.call(payload, "description")) values.description = payload.description;
+  if (columns.has("location") && Object.prototype.hasOwnProperty.call(payload, "location")) values.location = payload.location;
+  if (columns.has("video_link") && Object.prototype.hasOwnProperty.call(payload, "video_link")) values.video_link = payload.video_link;
+  if (columns.has("all_day") && Object.prototype.hasOwnProperty.call(payload, "all_day")) values.all_day = payload.all_day;
+  if (columns.has("repeat") && Object.prototype.hasOwnProperty.call(payload, "repeat")) values.repeat = payload.repeat;
+  if (columns.has("reminders") && Object.prototype.hasOwnProperty.call(payload, "reminders")) values.reminders = payload.reminders;
+  if (columns.has("visibility") && Object.prototype.hasOwnProperty.call(payload, "visibility")) values.visibility = payload.visibility;
+  if (columns.has("busy") && Object.prototype.hasOwnProperty.call(payload, "busy")) values.busy = payload.busy;
+  if (columns.has("guests_can_modify") && Object.prototype.hasOwnProperty.call(payload, "guests_can_modify")) values.guests_can_modify = payload.guests_can_modify;
+  if (columns.has("guests_can_invite") && Object.prototype.hasOwnProperty.call(payload, "guests_can_invite")) values.guests_can_invite = payload.guests_can_invite;
+  if (columns.has("guests_can_see_guest_list") && Object.prototype.hasOwnProperty.call(payload, "guests_can_see_guest_list")) values.guests_can_see_guest_list = payload.guests_can_see_guest_list;
+  if (columns.has("guests") && Object.prototype.hasOwnProperty.call(payload, "guests")) values.guests = payload.guests;
+  if (columns.has("metadata") && Object.prototype.hasOwnProperty.call(payload, "metadata")) values.metadata = payload.metadata;
+  if (columns.has("event_metadata") && Object.prototype.hasOwnProperty.call(payload, "metadata")) values.event_metadata = payload.metadata;
+  return values;
+}
+
+async function getCalendarEventSelectColumns(): Promise<string[]> {
+  const columns = await getCalendarEventColumns();
+  const selectColumns = [
+    "id",
+    "user_id",
+    "title",
+    "project_title",
+    "date",
+    "end_date",
+    "start_time",
+    "end_time",
+    "color_key",
+    "google_event_id",
+    "calendar_type",
+    "task_id",
+  ];
+  if (columns.has("description")) selectColumns.push("description");
+  if (columns.has("location")) selectColumns.push("location");
+  if (columns.has("video_link")) selectColumns.push("video_link");
+  if (columns.has("all_day")) selectColumns.push("all_day");
+  if (columns.has("repeat")) selectColumns.push("repeat");
+  if (columns.has("reminders")) selectColumns.push("reminders");
+  if (columns.has("visibility")) selectColumns.push("visibility");
+  if (columns.has("busy")) selectColumns.push("busy");
+  if (columns.has("guests_can_modify")) selectColumns.push("guests_can_modify");
+  if (columns.has("guests_can_invite")) selectColumns.push("guests_can_invite");
+  if (columns.has("guests_can_see_guest_list")) selectColumns.push("guests_can_see_guest_list");
+  if (columns.has("guests")) selectColumns.push("guests");
+  if (columns.has("metadata")) selectColumns.push("metadata");
+  if (columns.has("event_metadata")) selectColumns.push("event_metadata");
+  return selectColumns;
+}
+
+// PMS's calendar_events.task_id column is a real Postgres `uuid`. Plan-for-Day
+// "pseudo tasks" — the built-in Morning Break / Lunch / Evening Break slots —
+// use non-UUID string ids ("break-morning", "break-lunch", "break-evening"),
+// which Postgres rejects outright with "invalid input syntax for type uuid".
+// Deterministically derive a stable UUID (v5-style, SHA-1 based) from any
+// non-UUID id so the same pseudo task always maps to the same PMS row across
+// edits/refreshes, without needing to change PMS's column type.
+export function toTaskUuid(taskId: string): string {
+  if (UUID_RE.test(taskId)) return taskId;
+  const hash = crypto.createHash("sha1").update(`timestrap-plan-task:${taskId}`).digest();
+  const bytes = Buffer.from(hash.subarray(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x50; // version 5
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+async function resolvePmsUserId(employeeCode: string): Promise<string | null> {
+  if (!employeeCode) return null;
+  const result = await pmsPool.query(
+    `SELECT u.id FROM users u JOIN employees e ON u.employee_id = e.id WHERE e.emp_code = $1 LIMIT 1`,
+    [employeeCode]
+  );
+  return result.rows[0]?.id || null;
 }
 
 // PMS's color_key column is a free-text string (e.g. "peacock"). Timestrap's
@@ -65,6 +264,7 @@ const colorKeyToColorIdx = (key: string | null) => {
 };
 
 function mapRow(row: any): PmsCalendarEvent {
+  const metadata = parseMetadata(row.metadata || row.event_metadata);
   return {
     id: row.id,
     userId: row.user_id,
@@ -78,10 +278,21 @@ function mapRow(row: any): PmsCalendarEvent {
     googleEventId: row.google_event_id,
     source: row.calendar_type === "task" ? "plan" : "manual",
     pmsId: row.task_id || undefined,
+    description: row.description ?? metadata.description ?? "",
+    location: row.location ?? metadata.location ?? "",
+    videoLink: row.video_link ?? row.videoLink ?? metadata.videoLink ?? "",
+    allDay: typeof row.all_day === "boolean" ? row.all_day : !!metadata.allDay,
+    calendarType: row.calendar_type ?? metadata.calendarType ?? "meeting",
+    repeat: row.repeat ?? metadata.repeat ?? "none",
+    reminders: parseReminders(row.reminders) ?? (Array.isArray(metadata.reminders) ? metadata.reminders : [30]),
+    visibility: normalizeVisibility(row.visibility ?? metadata.visibility),
+    busy: normalizeBusy(row.busy ?? metadata.busy) ?? true,
+    guestsCanModify: typeof row.guests_can_modify === "boolean" ? row.guests_can_modify : false,
+    guestsCanInvite: typeof row.guests_can_invite === "boolean" ? row.guests_can_invite : true,
+    guestsCanSeeGuestList: typeof row.guests_can_see_guest_list === "boolean" ? row.guests_can_see_guest_list : true,
+    guests: Array.isArray(row.guests) ? row.guests : [],
   };
 }
-
-const SELECT_COLUMNS = `id, user_id, title, project_title, date, end_date, start_time, end_time, color_key, google_event_id, calendar_type, task_id`;
 
 // Returns BOTH manual ('meeting') and plan ('task') rows for the day — this
 // is the single shared read path both calendar UIs should use.
@@ -89,9 +300,10 @@ export async function getCalendarEvents(employeeCode: string, date?: string): Pr
   const pmsUserId = await resolvePmsUserId(employeeCode);
   if (!pmsUserId) return [];
 
+  const selectColumns = await getCalendarEventSelectColumns();
   const params: any[] = [pmsUserId];
   let query = `
-    SELECT ${SELECT_COLUMNS}
+    SELECT ${selectColumns.join(", ")}
     FROM calendar_events
     WHERE user_id = $1 AND source = 'app' AND calendar_type IN ('meeting', 'task')
   `;
@@ -113,17 +325,34 @@ export async function createCalendarEvent(employeeCode: string, evt: {
   startTime: string;
   endTime: string;
   colorIdx?: number;
+  description?: string;
+  location?: string;
+  videoLink?: string;
+  allDay?: boolean;
+  calendarType?: string;
+  repeat?: string;
+  reminders?: number[];
+  visibility?: string;
+  busy?: boolean;
 }): Promise<PmsCalendarEvent | null> {
   const pmsUserId = await resolvePmsUserId(employeeCode);
   if (!pmsUserId) return null;
 
-  const query = `
-    INSERT INTO calendar_events
-      (user_id, title, project_title, date, end_date, start_time, end_time, color_key, calendar_type, source)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'meeting', 'app')
-    RETURNING ${SELECT_COLUMNS}
-  `;
-  const values = [
+  const selectColumns = await getCalendarEventSelectColumns();
+  const extraPayload = await buildInsertPayload(evt as any);
+  const insertColumns = [
+    "user_id",
+    "title",
+    "project_title",
+    "date",
+    "end_date",
+    "start_time",
+    "end_time",
+    "color_key",
+    "calendar_type",
+    "source",
+  ];
+  const insertValues: any[] = [
     pmsUserId,
     evt.title || "Untitled event",
     evt.project || null,
@@ -132,8 +361,25 @@ export async function createCalendarEvent(employeeCode: string, evt: {
     evt.startTime,
     evt.endTime,
     colorIdxToColorKey(evt.colorIdx ?? 0),
+    evt.calendarType || "meeting",
+    "app",
   ];
-  const result = await pmsPool.query(query, values);
+  const columnNames: string[] = [...insertColumns];
+  const placeholders: string[] = insertColumns.map((_, index) => `$${index + 1}`);
+
+  Object.entries(extraPayload).forEach(([columnName, value]) => {
+    columnNames.push(columnName);
+    insertValues.push(value);
+    placeholders.push(`$${insertValues.length}`);
+  });
+
+  const query = `
+    INSERT INTO calendar_events
+      (${columnNames.join(", ")})
+    VALUES (${placeholders.join(", ")})
+    RETURNING ${selectColumns.join(", ")}
+  `;
+  const result = await pmsPool.query(query, insertValues);
   return mapRow(result.rows[0]);
 }
 
@@ -145,24 +391,31 @@ export async function updateCalendarEvent(id: string, employeeCode: string, evt:
   startTime?: string;
   endTime?: string;
   colorIdx?: number;
+  description?: string;
+  location?: string;
+  videoLink?: string;
+  allDay?: boolean;
+  calendarType?: string;
+  repeat?: string;
+  reminders?: number[];
+  visibility?: string;
+  busy?: boolean;
 }): Promise<PmsCalendarEvent | null> {
   const pmsUserId = await resolvePmsUserId(employeeCode);
   if (!pmsUserId) return null;
 
-  const query = `
-    UPDATE calendar_events
-    SET
-      title = COALESCE($3, title),
-      project_title = COALESCE($4, project_title),
-      date = COALESCE($5, date),
-      end_date = COALESCE($6, end_date),
-      start_time = COALESCE($7, start_time),
-      end_time = COALESCE($8, end_time),
-      color_key = COALESCE($9, color_key)
-    WHERE id = $1 AND user_id = $2 AND source = 'app' AND calendar_type = 'meeting'
-    RETURNING ${SELECT_COLUMNS}
-  `;
-  const values = [
+  const selectColumns = await getCalendarEventSelectColumns();
+  const extraPayload = await buildUpdatePayload(evt as any);
+  const setClauses = [
+    "title = COALESCE($3, title)",
+    "project_title = COALESCE($4, project_title)",
+    "date = COALESCE($5, date)",
+    "end_date = COALESCE($6, end_date)",
+    "start_time = COALESCE($7, start_time)",
+    "end_time = COALESCE($8, end_time)",
+    "color_key = COALESCE($9, color_key)",
+  ];
+  const values: any[] = [
     id,
     pmsUserId,
     evt.title ?? null,
@@ -173,6 +426,24 @@ export async function updateCalendarEvent(id: string, employeeCode: string, evt:
     evt.endTime ?? null,
     evt.colorIdx !== undefined ? colorIdxToColorKey(evt.colorIdx) : null,
   ];
+  const columnAssignments: string[] = [...setClauses];
+  if (evt.calendarType !== undefined) {
+    columnAssignments.push(`calendar_type = $${values.length + 1}`);
+    values.push(evt.calendarType || "meeting");
+  }
+
+  Object.entries(extraPayload).forEach(([columnName, value]) => {
+    columnAssignments.push(`${columnName} = $${values.length + 1}`);
+    values.push(value);
+  });
+
+  const query = `
+    UPDATE calendar_events
+    SET
+      ${columnAssignments.join(",\n      ")}
+    WHERE id = $1 AND user_id = $2 AND source = 'app' AND calendar_type = 'meeting'
+    RETURNING ${selectColumns.join(", ")}
+  `;
   const result = await pmsPool.query(query, values);
   if (result.rows.length === 0) return null;
   return mapRow(result.rows[0]);
@@ -206,28 +477,32 @@ export async function upsertPlanCalendarEvent(employeeCode: string, evt: {
   const pmsUserId = await resolvePmsUserId(employeeCode);
   if (!pmsUserId) return null;
 
+  const taskUuid = toTaskUuid(evt.taskId);
+
   const existing = await pmsPool.query(
     `SELECT id FROM calendar_events WHERE user_id = $1 AND task_id = $2 AND calendar_type = 'task'`,
-    [pmsUserId, evt.taskId]
+    [pmsUserId, taskUuid]
   );
 
   if (existing.rows.length > 0) {
+    const selectColumns = await getCalendarEventSelectColumns();
     const result = await pmsPool.query(
       `UPDATE calendar_events
        SET title = $3, project_title = $4, task_title = $3, date = $5, end_date = $5, start_time = $6, end_time = $7
        WHERE id = $1 AND user_id = $2
-       RETURNING ${SELECT_COLUMNS}`,
+       RETURNING ${selectColumns.join(", ")}`,
       [existing.rows[0].id, pmsUserId, evt.title || "Untitled task", evt.project || null, evt.date, evt.startTime, evt.endTime]
     );
     return mapRow(result.rows[0]);
   }
 
+  const selectColumns = await getCalendarEventSelectColumns();
   const result = await pmsPool.query(
     `INSERT INTO calendar_events
        (user_id, title, project_title, date, end_date, start_time, end_time, calendar_type, source, task_id, task_title)
      VALUES ($1, $2, $3, $4, $4, $5, $6, 'task', 'app', $7, $2)
-     RETURNING ${SELECT_COLUMNS}`,
-    [pmsUserId, evt.title || "Untitled task", evt.project || null, evt.date, evt.startTime, evt.endTime, evt.taskId]
+     RETURNING ${selectColumns.join(", ")}`,
+    [pmsUserId, evt.title || "Untitled task", evt.project || null, evt.date, evt.startTime, evt.endTime, taskUuid]
   );
   return mapRow(result.rows[0]);
 }
@@ -239,7 +514,7 @@ export async function deletePlanCalendarEvent(employeeCode: string, taskId: stri
 
   await pmsPool.query(
     `DELETE FROM calendar_events WHERE user_id = $1 AND task_id = $2 AND calendar_type = 'task'`,
-    [pmsUserId, taskId]
+    [pmsUserId, toTaskUuid(taskId)]
   );
 }
 

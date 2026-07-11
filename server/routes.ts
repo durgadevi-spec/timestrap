@@ -16,7 +16,8 @@ import {
   deletePlanCalendarEvent as deletePmsPlanCalendarEvent,
   getGoogleStatus as getPmsGoogleStatus,
   disconnectGoogle as disconnectPmsGoogle,
-} from "./pmsCalendarEvents";import { getLMSHours } from "./lmsSupabase";
+} from "./Pmscalendarevents";
+import { getLMSHours } from "./lmsSupabase";
 import { registerVoiceRoutes } from "./voice";
 import { format, parseISO, eachDayOfInterval, isSameDay } from "date-fns";
 import { sendEmail } from "./email";
@@ -714,6 +715,96 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Plan calendar delete-sync error:", error);
       res.status(500).json({ error: "Failed to remove synced plan event from PMS" });
+    }
+  });
+
+  // ============ CALENDAR EVENT GUESTS (Timestrap-owned, separate from PMS) ============
+  // Guests + guest permissions for a calendar event (manual or plan/task). Stored
+  // in Timestrap's own DB, keyed by (employeeCode, eventId), so this never has to
+  // guess at columns that may or may not exist on PMS's shared calendar_events table.
+  app.get("/api/calendar-events/:id/guests", async (req, res) => {
+    try {
+      const { employeeCode } = req.query;
+      if (!employeeCode) return res.status(400).json({ error: "employeeCode is required" });
+
+      const guestsResult = await pool.query(
+        `SELECT id, name, email, is_external, optional FROM calendar_event_guests WHERE employee_code = $1 AND event_id = $2 ORDER BY created_at ASC`,
+        [employeeCode, req.params.id]
+      );
+      const settingsResult = await pool.query(
+        `SELECT guests_can_modify, guests_can_invite, guests_can_see_guest_list FROM calendar_event_settings WHERE employee_code = $1 AND event_id = $2`,
+        [employeeCode, req.params.id]
+      );
+      const settings = settingsResult.rows[0] || { guests_can_modify: false, guests_can_invite: true, guests_can_see_guest_list: true };
+
+      res.json({
+        guests: guestsResult.rows.map((row) => ({
+          id: row.id,
+          name: row.name || row.email,
+          email: row.email,
+          isExternal: !!row.is_external,
+          optional: !!row.optional,
+        })),
+        guestsCanModify: !!settings.guests_can_modify,
+        guestsCanInvite: !!settings.guests_can_invite,
+        guestsCanSeeGuestList: !!settings.guests_can_see_guest_list,
+      });
+    } catch (error) {
+      console.error("Get calendar event guests error:", error);
+      res.status(500).json({ error: "Failed to load guests" });
+    }
+  });
+
+  app.put("/api/calendar-events/:id/guests", async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const { employeeCode, guests, guestsCanModify, guestsCanInvite, guestsCanSeeGuestList } = req.body;
+      if (!employeeCode) return res.status(400).json({ error: "employeeCode is required" });
+      const eventId = req.params.id;
+      const guestList = Array.isArray(guests) ? guests : [];
+
+      await client.query("BEGIN");
+      await client.query(`DELETE FROM calendar_event_guests WHERE employee_code = $1 AND event_id = $2`, [employeeCode, eventId]);
+      for (const g of guestList) {
+        if (!g?.email) continue;
+        await client.query(
+          `INSERT INTO calendar_event_guests (event_id, employee_code, name, email, is_external, optional)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [eventId, employeeCode, g.name || g.email, g.email, !!g.isExternal, !!g.optional]
+        );
+      }
+      await client.query(
+        `INSERT INTO calendar_event_settings (event_id, employee_code, guests_can_modify, guests_can_invite, guests_can_see_guest_list)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (employee_code, event_id) DO UPDATE SET
+           guests_can_modify = EXCLUDED.guests_can_modify,
+           guests_can_invite = EXCLUDED.guests_can_invite,
+           guests_can_see_guest_list = EXCLUDED.guests_can_see_guest_list`,
+        [eventId, employeeCode, !!guestsCanModify, guestsCanInvite !== false, guestsCanSeeGuestList !== false]
+      );
+      await client.query("COMMIT");
+
+      res.json({ success: true, guests: guestList });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      console.error("Save calendar event guests error:", error);
+      res.status(500).json({ error: "Failed to save guests" });
+    } finally {
+      client.release();
+    }
+  });
+
+  // When a manual/plan event is deleted, its guest rows should go with it.
+  app.delete("/api/calendar-events/:id/guests", async (req, res) => {
+    try {
+      const { employeeCode } = req.query;
+      if (!employeeCode) return res.status(400).json({ error: "employeeCode is required" });
+      await pool.query(`DELETE FROM calendar_event_guests WHERE employee_code = $1 AND event_id = $2`, [employeeCode, req.params.id]);
+      await pool.query(`DELETE FROM calendar_event_settings WHERE employee_code = $1 AND event_id = $2`, [employeeCode, req.params.id]);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete calendar event guests error:", error);
+      res.status(500).json({ error: "Failed to delete guests" });
     }
   });
 

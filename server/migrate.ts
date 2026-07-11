@@ -63,6 +63,32 @@ export async function runMigrations() {
       is_closed BOOLEAN DEFAULT false NOT NULL,
       closed_at TIMESTAMP
     )`,
+    // Calendar event guests — deliberately stored in Timestrap's own DB rather
+    // than PMS's shared `calendar_events` table, since we can't safely assume
+    // PMS's table has guest-related columns without risking breaking every
+    // event save if they don't exist. Keyed by the calendar event's id (for
+    // manual/meeting events this is the PMS calendar_events row id; for
+    // plan/task events this is the plan task id, e.g. a PMS task uuid or a
+    // pseudo id like "break-lunch").
+    `CREATE TABLE IF NOT EXISTS calendar_event_guests (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      event_id VARCHAR NOT NULL,
+      employee_code VARCHAR NOT NULL,
+      name TEXT,
+      email TEXT NOT NULL,
+      is_external BOOLEAN DEFAULT false,
+      optional BOOLEAN DEFAULT false,
+      created_at TIMESTAMP DEFAULT now() NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS calendar_event_guests_event_idx ON calendar_event_guests (employee_code, event_id)`,
+    `CREATE TABLE IF NOT EXISTS calendar_event_settings (
+      event_id VARCHAR NOT NULL,
+      employee_code VARCHAR NOT NULL,
+      guests_can_modify BOOLEAN DEFAULT false,
+      guests_can_invite BOOLEAN DEFAULT true,
+      guests_can_see_guest_list BOOLEAN DEFAULT true,
+      PRIMARY KEY (employee_code, event_id)
+    )`,
     `CREATE EXTENSION IF NOT EXISTS vector`,
     `CREATE TABLE IF NOT EXISTS document_embeddings (
       id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

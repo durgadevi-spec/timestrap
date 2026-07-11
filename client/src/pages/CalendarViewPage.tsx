@@ -24,17 +24,39 @@ interface CalendarViewPageProps {
 
 type CalendarEventSource = "plan" | "manual" | "google";
 
+interface Guest {
+  id: string;
+  name: string;
+  email: string;
+  isExternal: boolean;
+  optional: boolean;
+}
+
 interface CalendarEvent {
   id: string;
   title: string;
   project: string;
   date: string;
+  endDate?: string;
   startTime: string;
   endTime: string;
   colorIdx: number;
   source?: CalendarEventSource;
   pmsId?: string;
   googleEventId?: string;
+  guests?: Guest[];
+  guestsCanModify?: boolean;
+  guestsCanInvite?: boolean;
+  guestsCanSeeGuestList?: boolean;
+  description?: string;
+  location?: string;
+  videoLink?: string;
+  allDay?: boolean;
+  calendarType?: string;
+  repeat?: string;
+  reminders?: number[];
+  visibility?: "default" | "public" | "private";
+  busy?: boolean;
 }
 
 interface ModalState {
@@ -56,6 +78,7 @@ interface DayColumnProps {
   events: CalendarEvent[];
   onSlotClick: (day: Date, hour: number) => void;
   onEventClick: (event: CalendarEvent) => void;
+  onEventResize?: (event: CalendarEvent, newEndTime: string) => void;
   isToday: boolean;
 }
 
@@ -64,6 +87,7 @@ interface WeekGridProps {
   events: CalendarEvent[];
   onSlotClick: (day: Date, hour: number) => void;
   onEventClick: (event: CalendarEvent) => void;
+  onEventResize?: (event: CalendarEvent, newEndTime: string) => void;
   today: Date;
 }
 
@@ -102,6 +126,17 @@ interface TaskOption {
   project_code?: string;
 }
 
+interface EmployeeOption {
+  id: string;
+  name: string;
+  email: string;
+  department?: string;
+  designation?: string;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const guestUid = () => `gst_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
 const normalizeProjectOption = (candidate: Partial<ProjectOption> & { project_name?: string; project_code?: string }, index: number): ProjectOption => ({
   id: candidate.id || candidate.project_code || `${candidate.project_name || "project"}-${index}`,
   project_name: candidate.project_name || "",
@@ -121,6 +156,33 @@ const EVENT_COLORS = [
   { bg: "#00897b", light: "#e0f2f1", text: "#00695c" },
 ];
 
+const CALENDAR_TYPES = [
+  { key: "meeting", label: "Meetings" },
+  { key: "deadline", label: "Deadlines" },
+  { key: "task", label: "Tasks" },
+  { key: "milestone", label: "Project milestones" },
+  { key: "personal", label: "Personal" },
+];
+
+const REPEAT_OPTIONS = [
+  { value: "none", label: "Does not repeat" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "yearly", label: "Yearly" },
+];
+
+const REMINDER_OPTIONS = [
+  { value: 0, label: "At time of event" },
+  { value: 5, label: "5 minutes before" },
+  { value: 10, label: "10 minutes before" },
+  { value: 15, label: "15 minutes before" },
+  { value: 30, label: "30 minutes before" },
+  { value: 60, label: "1 hour before" },
+  { value: 1440, label: "1 day before" },
+  { value: 10080, label: "1 week before" },
+];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const toMin = (t: string): number => {
@@ -130,7 +192,7 @@ const toMin = (t: string): number => {
 
 const toDurationMinutes = (startTime: string, endTime: string) => Math.max(30, toMin(endTime) - toMin(startTime));
 
-const readStoredArray = (key: string | null) => {
+const readStoredArray = (key: string | null): any[] => {
   if (!key || typeof window === "undefined") return [];
 
   try {
@@ -245,10 +307,23 @@ const toApiEventBody = (employeeCode: string, event: Partial<CalendarEvent>) => 
   title: event.title,
   project: event.project,
   date: event.date,
-  endDate: event.date,
+  endDate: event.endDate || event.date,
   startTime: event.startTime,
   endTime: event.endTime,
   colorIdx: event.colorIdx,
+  description: event.description,
+  location: event.location,
+  videoLink: event.videoLink,
+  allDay: event.allDay,
+  calendarType: event.calendarType || "meeting",
+  repeat: event.repeat || "none",
+  reminders: event.reminders,
+  visibility: event.visibility || "default",
+  busy: event.busy !== false,
+  guests: event.guests || [],
+  guestsCanModify: event.guestsCanModify || false,
+  guestsCanInvite: event.guestsCanInvite !== false,
+  guestsCanSeeGuestList: event.guestsCanSeeGuestList !== false,
 });
 
 const fromApiEvent = (row: any): CalendarEvent => ({
@@ -256,11 +331,21 @@ const fromApiEvent = (row: any): CalendarEvent => ({
   title: row.title,
   project: row.project || "",
   date: row.date,
+  endDate: row.endDate || row.date,
   startTime: row.startTime,
   endTime: row.endTime,
   colorIdx: row.colorIdx ?? 0,
   source: "manual",
   googleEventId: row.googleEventId || undefined,
+  description: row.description || "",
+  location: row.location || "",
+  videoLink: row.videoLink || "",
+  allDay: !!row.allDay,
+  calendarType: row.calendarType || "meeting",
+  repeat: row.repeat || "none",
+  reminders: Array.isArray(row.reminders) ? row.reminders : [30],
+  visibility: row.visibility || "default",
+  busy: row.busy !== false,
 });
 
 const fetchManualEvents = async (employeeCode: string, date: string): Promise<CalendarEvent[]> => {
@@ -295,6 +380,39 @@ const deleteManualEvent = async (employeeCode: string, id: string): Promise<void
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Failed to delete calendar event");
+};
+
+// ─── Guests API (Timestrap-owned table, separate from PMS) ──────────────────
+
+const fetchEventGuests = async (
+  employeeCode: string,
+  eventId: string
+): Promise<{ guests: Guest[]; guestsCanModify: boolean; guestsCanInvite: boolean; guestsCanSeeGuestList: boolean }> => {
+  const res = await fetch(`/api/calendar-events/${encodeURIComponent(eventId)}/guests?employeeCode=${encodeURIComponent(employeeCode)}`);
+  if (!res.ok) return { guests: [], guestsCanModify: false, guestsCanInvite: true, guestsCanSeeGuestList: true };
+  return res.json();
+};
+
+const saveEventGuests = async (
+  employeeCode: string,
+  eventId: string,
+  payload: { guests: Guest[]; guestsCanModify: boolean; guestsCanInvite: boolean; guestsCanSeeGuestList: boolean }
+): Promise<void> => {
+  await fetch(`/api/calendar-events/${encodeURIComponent(eventId)}/guests`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ employeeCode, ...payload }),
+  });
+};
+
+const deleteEventGuests = async (employeeCode: string, eventId: string): Promise<void> => {
+  try {
+    await fetch(`/api/calendar-events/${encodeURIComponent(eventId)}/guests?employeeCode=${encodeURIComponent(employeeCode)}`, {
+      method: "DELETE",
+    });
+  } catch (err) {
+    console.error("Failed to delete event guests:", err);
+  }
 };
 
 const formatLastSynced = (isoString: string | null): string => {
@@ -351,7 +469,7 @@ const getIsLightMode = (): boolean => {
 
 // ─── Components ───────────────────────────────────────────────────────────────
 
-function EventPill({ event, onClick, style, compact = false, onDragStart, onDragEnd }: EventPillProps & { onDragStart?: (e: React.DragEvent) => void; onDragEnd?: () => void }) {
+function EventPill({ event, onClick, style, compact = false, onDragStart, onDragEnd, onResizeStart }: EventPillProps & { onDragStart?: (e: React.DragEvent) => void; onDragEnd?: () => void; onResizeStart?: (e: React.MouseEvent) => void }) {
   const c = EVENT_COLORS[event.colorIdx ?? 0];
   const dur = toMin(event.endTime) - toMin(event.startTime);
   return (
@@ -368,7 +486,7 @@ function EventPill({ event, onClick, style, compact = false, onDragStart, onDrag
         background: c.bg, color: "#fff", borderRadius: 6,
         padding: compact ? "2px 6px" : "4px 8px",
         cursor: "grab", overflow: "hidden", userSelect: "none",
-        fontSize: 12, lineHeight: 1.3, boxSizing: "border-box", ...style,
+        fontSize: 12, lineHeight: 1.3, boxSizing: "border-box", position: "relative", ...style,
       }}
       onMouseDown={(e) => e.currentTarget.style.cursor = "grabbing"}
       onMouseUp={(e) => e.currentTarget.style.cursor = "grab"}
@@ -381,14 +499,67 @@ function EventPill({ event, onClick, style, compact = false, onDragStart, onDrag
           {event.startTime} – {event.endTime}
         </div>
       )}
+      {onResizeStart && (
+        <div
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onResizeStart(e);
+          }}
+          title="Drag to extend or shorten"
+          style={{
+            position: "absolute", left: 0, right: 0, bottom: 0, height: 6,
+            cursor: "ns-resize",
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function DayColumn({ day, events, onSlotClick, onEventClick, onDragStart, onDragEnd, onEventDrop }: DayColumnProps & { onDragStart?: (e: React.DragEvent) => void; onDragEnd?: () => void; onEventDrop?: (event: CalendarEvent, targetHour: number) => void }) {
+const SNAP_MIN = 15; // resize snapping granularity, in minutes
+const MIN_EVENT_MIN = 15; // shortest an event can be resized down to
+
+function DayColumn({ day, events, onSlotClick, onEventClick, onEventResize, onDragStart, onDragEnd, onEventDrop }: DayColumnProps & { onDragStart?: (e: React.DragEvent) => void; onDragEnd?: () => void; onEventDrop?: (event: CalendarEvent, targetHour: number) => void }) {
   const SLOT_H = 48;
   const START_HOUR = 7;
   const [dragOverHour, setDragOverHour] = useState<number | null>(null);
+  const [resizing, setResizing] = useState<{ id: string; startY: number; startMin: number; origEndMin: number; deltaMin: number } | null>(null);
+
+  // Track the in-progress resize with mousemove/mouseup on the window, so the
+  // drag keeps working even if the cursor leaves the event pill.
+  useEffect(() => {
+    if (!resizing) return;
+
+    const handleMove = (e: MouseEvent) => {
+      const deltaPx = e.clientY - resizing.startY;
+      const rawDeltaMin = (deltaPx / SLOT_H) * 60;
+      const snapped = Math.round(rawDeltaMin / SNAP_MIN) * SNAP_MIN;
+      setResizing((r) => (r ? { ...r, deltaMin: snapped } : r));
+    };
+
+    const handleUp = () => {
+      setResizing((r) => {
+        if (r && onEventResize) {
+          const evt = events.find((e) => e.id === r.id);
+          if (evt) {
+            const proposedEnd = r.origEndMin + r.deltaMin;
+            const clampedEnd = Math.max(r.startMin + MIN_EVENT_MIN, Math.min(23 * 60 + 59, proposedEnd));
+            const newEndTime = `${String(Math.floor(clampedEnd / 60)).padStart(2, "0")}:${String(clampedEnd % 60).padStart(2, "0")}`;
+            onEventResize(evt, newEndTime);
+          }
+        }
+        return null;
+      });
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [resizing, onEventResize, events]);
 
   return (
     <div style={{ flex: 1, minWidth: 0, position: "relative", borderLeft: "1px solid #e0e0e0" }}>
@@ -433,18 +604,23 @@ function DayColumn({ day, events, onSlotClick, onEventClick, onDragStart, onDrag
       ))}
       {events.map((evt) => {
         const startMin = toMin(evt.startTime);
-        const endMin = toMin(evt.endTime);
+        const baseEndMin = Math.max(startMin + 15, toMin(evt.endTime));
+        const isResizingThis = resizing?.id === evt.id;
+        const liveEndMin = isResizingThis
+          ? Math.max(startMin + MIN_EVENT_MIN, Math.min(23 * 60 + 59, baseEndMin + resizing.deltaMin))
+          : baseEndMin;
         const topOffset = ((startMin - START_HOUR * 60) / 60) * SLOT_H;
-        const height = Math.max(20, ((endMin - startMin) / 60) * SLOT_H - 2);
+        const height = Math.max(20, ((liveEndMin - startMin) / 60) * SLOT_H - 2);
         return (
           <EventPill
             key={evt.id}
             event={evt}
             onClick={onEventClick}
             compact={false}
-            onDragStart={onDragStart}
+            onDragStart={isResizingThis ? undefined : onDragStart}
             onDragEnd={() => onDragEnd?.()}
-            style={{ position: "absolute", left: 2, right: 2, top: topOffset, height, zIndex: 1 }}
+            onResizeStart={onEventResize ? (e) => setResizing({ id: evt.id, startY: e.clientY, startMin, origEndMin: baseEndMin, deltaMin: 0 }) : undefined}
+            style={{ position: "absolute", left: 2, right: 2, top: topOffset, height, zIndex: isResizingThis ? 20 : 1 }}
           />
         );
       })}
@@ -452,7 +628,7 @@ function DayColumn({ day, events, onSlotClick, onEventClick, onDragStart, onDrag
   );
 }
 
-function WeekGrid({ weekDays, events, onSlotClick, onEventClick, today }: WeekGridProps) {
+function WeekGrid({ weekDays, events, onSlotClick, onEventClick, onEventResize, today }: WeekGridProps) {
   const SLOT_H = 48;
   return (
     <div style={{ display: "flex", flex: 1, overflow: "auto", position: "relative" }}>
@@ -489,6 +665,7 @@ function WeekGrid({ weekDays, events, onSlotClick, onEventClick, today }: WeekGr
                 events={dayEvts}
                 onSlotClick={onSlotClick}
                 onEventClick={onEventClick}
+                onEventResize={onEventResize}
                 isToday={isSameDay(day, today)}
               />
             );
@@ -587,9 +764,19 @@ function EventModal({ event, onClose, onSave, onDelete, mode, user }: EventModal
   const [title, setTitle] = useState<string>(event?.title === "Untitled Task" ? "" : (event?.title || ""));
   const [project, setProject] = useState<string>(event?.project || "");
   const [date, setDate] = useState<string>(event?.date || format(new Date(), "yyyy-MM-dd"));
+  const [endDate, setEndDate] = useState<string>(event?.endDate || event?.date || format(new Date(), "yyyy-MM-dd"));
   const [start, setStart] = useState<string>(event?.startTime || "09:00");
   const [end, setEnd] = useState<string>(event?.endTime || "10:00");
   const [colorIdx, setColorIdx] = useState<number>(event?.colorIdx ?? 0);
+  const [calendarType, setCalendarType] = useState<string>(event?.calendarType || "meeting");
+  const [description, setDescription] = useState<string>(event?.description || "");
+  const [location, setLocation] = useState<string>(event?.location || "");
+  const [videoLink, setVideoLink] = useState<string>(event?.videoLink || "");
+  const [allDay, setAllDay] = useState<boolean>(event?.allDay ?? false);
+  const [repeat, setRepeat] = useState<string>(event?.repeat || "none");
+  const [reminders, setReminders] = useState<number[]>(event?.reminders || [30]);
+  const [visibility, setVisibility] = useState<"default" | "public" | "private">(event?.visibility || "default");
+  const [busy, setBusy] = useState<boolean>(event?.busy ?? true);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [tasks, setTasks] = useState<TaskOption[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
@@ -598,7 +785,71 @@ function EventModal({ event, onClose, onSave, onDelete, mode, user }: EventModal
   const [loadingProjects, setLoadingProjects] = useState<boolean>(false);
   const [loadingTasks, setLoadingTasks] = useState<boolean>(false);
 
+  const [guests, setGuests] = useState<Guest[]>(event?.guests || []);
+  const [guestsCanModify, setGuestsCanModify] = useState<boolean>(event?.guestsCanModify ?? false);
+  const [guestsCanInvite, setGuestsCanInvite] = useState<boolean>(event?.guestsCanInvite ?? true);
+  const [guestsCanSeeGuestList, setGuestsCanSeeGuestList] = useState<boolean>(event?.guestsCanSeeGuestList ?? true);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [guestSearch, setGuestSearch] = useState<string>("");
+  const [externalEmail, setExternalEmail] = useState<string>("");
+  const [showGuestPicker, setShowGuestPicker] = useState<boolean>(false);
+
   const dur = Math.max(0, toMin(end) - toMin(start));
+
+  const toggleReminder = (value: number) => {
+    setReminders((prev) => (prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value].sort((a, b) => a - b)));
+  };
+
+  // Load the team directory once (for the "add guest" search) and, in edit
+  // mode, the guests already saved against this event.
+  useEffect(() => {
+    let isMounted = true;
+
+    fetch("/api/employees")
+      .then((r) => r.json())
+      .then((data) => isMounted && setEmployees(Array.isArray(data) ? data : []))
+      .catch(() => isMounted && setEmployees([]));
+
+    const eventKey = event?.pmsId || event?.id;
+    if (mode === "edit" && eventKey && user?.employeeCode) {
+      fetchEventGuests(user.employeeCode, eventKey)
+        .then((data) => {
+          if (!isMounted) return;
+          setGuests(data.guests);
+          setGuestsCanModify(data.guestsCanModify);
+          setGuestsCanInvite(data.guestsCanInvite);
+          setGuestsCanSeeGuestList(data.guestsCanSeeGuestList);
+        })
+        .catch(() => undefined);
+    }
+
+    return () => {
+      isMounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const addGuest = (guest: Guest) => {
+    setGuests((prev) => (prev.some((g) => g.email.toLowerCase() === guest.email.toLowerCase()) ? prev : [...prev, guest]));
+  };
+
+  const removeGuest = (id: string) => setGuests((prev) => prev.filter((g) => g.id !== id));
+
+  const toggleGuestOptional = (id: string) =>
+    setGuests((prev) => prev.map((g) => (g.id === id ? { ...g, optional: !g.optional } : g)));
+
+  const addExternalEmail = () => {
+    const email = externalEmail.trim();
+    if (!EMAIL_RE.test(email)) return;
+    addGuest({ id: guestUid(), name: email, email, isExternal: true, optional: false });
+    setExternalEmail("");
+  };
+
+  const availableEmployees = employees.filter(
+    (e) =>
+      !guests.some((g) => g.email.toLowerCase() === (e.email || "").toLowerCase()) &&
+      (e.name || "").toLowerCase().includes(guestSearch.toLowerCase())
+  );
 
   useEffect(() => {
     if (!user?.id) {
@@ -746,9 +997,22 @@ function EventModal({ event, onClose, onSave, onDelete, mode, user }: EventModal
   const selectedTask = tasks.find((task) => task.id === selectedTaskId);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: getIsLightMode() ? "#000000" : "#fff", borderRadius: 12, width: 480, maxWidth: "95vw", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
-        <div style={{ background: EVENT_COLORS[colorIdx].bg, padding: "20px 24px 16px", color: "#fff" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: getIsLightMode() ? "#000000" : "#fff",
+          borderRadius: 16,
+          width: "min(860px, 95vw)",
+          maxWidth: "95vw",
+          maxHeight: "86vh",
+          overflowY: "auto",
+          overflowX: "hidden",
+          boxShadow: "0 12px 36px rgba(0, 0, 0, 0.22)",
+          scrollbarWidth: "thin",
+        }}
+      >
+        <div style={{ background: EVENT_COLORS[colorIdx].bg, padding: "16px 20px 12px", color: "#fff" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <input
               value={title}
@@ -764,8 +1028,32 @@ function EventModal({ event, onClose, onSave, onDelete, mode, user }: EventModal
             ))}
           </div>
         </div>
-        <div style={{ padding: "20px 24px" }}>
-          <div style={{ marginBottom: 12 }}>
+        <div style={{ padding: "16px 20px 20px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>TYPE</label>
+              <select
+                value={calendarType}
+                onChange={(e) => setCalendarType(e.target.value)}
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none", background: getIsLightMode() ? "#000000" : "#fff" }}
+              >
+                {CALENDAR_TYPES.map((type) => (
+                  <option key={type.key} value={type.key}>{type.label}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {EVENT_COLORS.map((c, i) => (
+                <div key={i} onClick={() => setColorIdx(i)} style={{ width: 20, height: 20, borderRadius: "50%", background: c.bg, border: i === colorIdx ? "2px solid #1a73e8" : "2px solid transparent", cursor: "pointer" }} />
+              ))}
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3c4043", cursor: "pointer", marginLeft: 6 }}>
+              <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} />
+              <span>All day</span>
+            </label>
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
             <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>PROJECT</label>
             <input
               value={project}
@@ -783,7 +1071,7 @@ function EventModal({ event, onClose, onSave, onDelete, mode, user }: EventModal
               <div style={{ fontSize: 12, color: "#70757a", marginTop: 6 }}>Loading projects…</div>
             )}
           </div>
-          <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 12 }}>
             <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>TASK</label>
             <select
               value={selectedTaskId}
@@ -803,33 +1091,208 @@ function EventModal({ event, onClose, onSave, onDelete, mode, user }: EventModal
               <div style={{ fontSize: 12, color: "#70757a", marginTop: 6 }}>Pick a project to see available tasks.</div>
             )}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
             <div>
               <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>DATE</label>
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none" }} />
             </div>
+            {!allDay && (
+              <div>
+                <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>START</label>
+                <input type="time" value={start} onChange={(e) => setStart(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none" }} />
+              </div>
+            )}
             <div>
-              <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>START</label>
-              <input type="time" value={start} onChange={(e) => setStart(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none" }} />
+              <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>END DATE</label>
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none" }} />
             </div>
-            <div>
-              <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>END</label>
-              <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none" }} />
+            {!allDay && (
+              <div>
+                <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>END</label>
+                <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none" }} />
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+            <div style={{ minWidth: 170 }}>
+              <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>REPEAT</label>
+              <select value={repeat} onChange={(e) => setRepeat(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none", background: getIsLightMode() ? "#000000" : "#fff" }}>
+                {REPEAT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>LOCATION</label>
+              <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Add location" style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none" }} />
             </div>
           </div>
-          {dur > 0 && (
-            <div style={{ fontSize: 12, color: "#70757a", marginBottom: 16 }}>
-              Duration: {Math.floor(dur / 60) > 0 ? `${Math.floor(dur / 60)}h ` : ""}{dur % 60 > 0 ? `${dur % 60}m` : ""}
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>VIDEO LINK</label>
+            <input value={videoLink} onChange={(e) => setVideoLink(e.target.value)} placeholder="Add video conference link" style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none" }} />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>DESCRIPTION</label>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Add description" rows={3} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none", resize: "vertical" }} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+            <div>
+              <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>BUSY / FREE</label>
+              <select value={busy ? "busy" : "free"} onChange={(e) => setBusy(e.target.value === "busy")} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none", background: getIsLightMode() ? "#000000" : "#fff" }}>
+                <option value="busy">Busy</option>
+                <option value="free">Free</option>
+              </select>
             </div>
-          )}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+            <div>
+              <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 4 }}>VISIBILITY</label>
+              <select value={visibility} onChange={(e) => setVisibility(e.target.value as "default" | "public" | "private")} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none", background: getIsLightMode() ? "#000000" : "#fff" }}>
+                <option value="default">Default</option>
+                <option value="public">Public</option>
+                <option value="private">Private</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ marginBottom: 12, borderTop: "1px solid #f0f0f0", paddingTop: 12 }}>
+            <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 8 }}>GUESTS</label>
+
+            {guests.length === 0 && (
+              <div style={{ fontSize: 12, color: "#9aa0a6", marginBottom: 8 }}>No guests added yet.</div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8, maxHeight: 140, overflowY: "auto" }}>
+              {guests.map((g) => (
+                <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid #e0e0e0", borderRadius: 6, padding: "6px 8px" }}>
+                  <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#e8f0fe", color: "#1a73e8", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {(g.name || g.email).slice(0, 2).toUpperCase()}
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</div>
+                    <div style={{ fontSize: 11, color: "#70757a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.email}</div>
+                  </div>
+                  {g.isExternal && (
+                    <span style={{ fontSize: 9, color: "#5f6368", border: "1px solid #dadce0", borderRadius: 4, padding: "1px 4px" }}>external</span>
+                  )}
+                  <button type="button" onClick={() => toggleGuestOptional(g.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 10, color: "#70757a" }}>
+                    {g.optional ? "Optional" : "Required"}
+                  </button>
+                  <button type="button" onClick={() => removeGuest(g.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#9aa0a6", fontSize: 14, lineHeight: 1 }}>×</button>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ position: "relative" }}>
+              <button
+                type="button"
+                onClick={() => setShowGuestPicker((v) => !v)}
+                style={{ width: "100%", padding: "7px 10px", border: "1px solid #dadce0", borderRadius: 6, background: getIsLightMode() ? "#000000" : "#fff", cursor: "pointer", fontSize: 13, color: "#3c4043" }}
+              >
+                + Add guests
+              </button>
+              {showGuestPicker && (
+                <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: getIsLightMode() ? "#000000" : "#fff", border: "1px solid #e0e0e0", borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,0.15)", zIndex: 10, padding: 8 }}>
+                  <input
+                    value={guestSearch}
+                    onChange={(e) => setGuestSearch(e.target.value)}
+                    placeholder="Search team members…"
+                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "6px 10px", fontSize: 13, outline: "none", marginBottom: 6 }}
+                  />
+                  <div style={{ maxHeight: 140, overflowY: "auto" }}>
+                    {availableEmployees.length === 0 && (
+                      <div style={{ fontSize: 12, color: "#9aa0a6", padding: "4px 2px" }}>No matching team members.</div>
+                    )}
+                    {availableEmployees.slice(0, 30).map((emp) => (
+                      <div
+                        key={emp.id}
+                        onClick={() =>
+                          addGuest({ id: guestUid(), name: emp.name, email: emp.email || "", isExternal: false, optional: false })
+                        }
+                        style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px", cursor: "pointer", borderRadius: 4 }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#f5f5f5")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        <div style={{ fontSize: 12 }}>{emp.name}</div>
+                        <div style={{ fontSize: 11, color: "#9aa0a6" }}>{emp.designation || emp.department}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 6, borderTop: "1px solid #f0f0f0", paddingTop: 6 }}>
+                    <input
+                      value={externalEmail}
+                      onChange={(e) => setExternalEmail(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && addExternalEmail()}
+                      placeholder="Invite by email…"
+                      style={{ flex: 1, boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "6px 10px", fontSize: 13, outline: "none" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={addExternalEmail}
+                      disabled={!EMAIL_RE.test(externalEmail.trim())}
+                      style={{ padding: "6px 12px", border: "none", borderRadius: 6, background: "#1a73e8", color: "#fff", fontSize: 12, cursor: EMAIL_RE.test(externalEmail.trim()) ? "pointer" : "not-allowed", opacity: EMAIL_RE.test(externalEmail.trim()) ? 1 : 0.5 }}
+                    >
+                      Invite
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#3c4043", cursor: "pointer" }}>
+                <input type="checkbox" checked={guestsCanModify} onChange={(e) => setGuestsCanModify(e.target.checked)} /> Guests can modify event
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#3c4043", cursor: "pointer" }}>
+                <input type="checkbox" checked={guestsCanInvite} onChange={(e) => setGuestsCanInvite(e.target.checked)} /> Guests can invite others
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#3c4043", cursor: "pointer" }}>
+                <input type="checkbox" checked={guestsCanSeeGuestList} onChange={(e) => setGuestsCanSeeGuestList(e.target.checked)} /> Guests can see guest list
+              </label>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 10, borderTop: "1px solid #f0f0f0", paddingTop: 12 }}>
+            <label style={{ fontSize: 12, color: "#5f6368", display: "block", marginBottom: 6 }}>NOTIFICATIONS</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+              {reminders.map((item) => (
+                <span key={item} style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "1px solid #e0e0e0", borderRadius: 999, padding: "4px 8px", fontSize: 11, color: "#3c4043" }}>
+                  {REMINDER_OPTIONS.find((option) => option.value === item)?.label || `${item} min before`}
+                  <button type="button" onClick={() => toggleReminder(item)} style={{ background: "none", border: "none", cursor: "pointer", color: "#70757a", fontSize: 12 }}>×</button>
+                </span>
+              ))}
+            </div>
+            <select
+              value=""
+              onChange={(e) => toggleReminder(Number(e.target.value))}
+              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e0e0e0", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none", background: getIsLightMode() ? "#000000" : "#fff" }}
+            >
+              <option value="">Add a notification</option>
+              {REMINDER_OPTIONS.filter((option) => !reminders.includes(option.value)).map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
             {mode === "edit" && event.id ? (
               <button onClick={() => onDelete(event.id!)} style={{ background: "none", border: "none", color: "#d93025", cursor: "pointer", fontSize: 13, padding: "8px 0" }}>Delete event</button>
             ) : <div />}
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={onClose} style={{ padding: "8px 20px", border: "1px solid #dadce0", borderRadius: 6, background: getIsLightMode() ? "#000000" : "white", cursor: "pointer", fontSize: 14, color: "#3c4043" }}>Cancel</button>
               <button
-                onClick={() => onSave({ id: event?.id || String(Date.now()), title, project, date, startTime: start, endTime: end, colorIdx, source: event?.source || "manual", pmsId: selectedTask?.id || event?.pmsId })}
+                onClick={() => onSave({
+                  id: event?.id || String(Date.now()),
+                  title, project, date, endDate, startTime: start, endTime: end, colorIdx,
+                  source: event?.source || "manual",
+                  pmsId: selectedTask?.id || event?.pmsId,
+                  guests, guestsCanModify, guestsCanInvite, guestsCanSeeGuestList,
+                  description,
+                  location,
+                  videoLink,
+                  allDay,
+                  calendarType,
+                  repeat,
+                  reminders,
+                  visibility,
+                  busy,
+                })}
                 style={{ padding: "8px 20px", border: "none", borderRadius: 6, background: "#1a73e8", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 500 }}
               >Save</button>
             </div>
@@ -877,10 +1340,12 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
 
         let manualEvents: CalendarEvent[] = [];
         try {
-          manualEvents = (await fetchManualEvents(user.employeeCode, targetDate)).map((event) => ({
-            ...event,
-            title: normalizeEventTitle(event.title, event.project),
-          }));
+          if (user.employeeCode) {
+            manualEvents = (await fetchManualEvents(user.employeeCode, targetDate)).map((event) => ({
+              ...event,
+              title: normalizeEventTitle(event.title, event.project),
+            }));
+          }
         } catch (err) {
           console.error("Failed to load manual calendar events from PMS:", err);
         }
@@ -907,13 +1372,20 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
             const localMatch = scheduleTasks.find((lt: any) => lt.pmsId === taskId || lt.id === taskId);
 
             // Extract timings safely from scheduleData or fallbacks
-            let scheduleData = {};
+            let scheduleData: Record<string, any> = {};
             try {
               scheduleData = typeof st.scheduleData === 'string' ? JSON.parse(st.scheduleData) : (st.scheduleData || {});
             } catch (e) { }
 
-            const startTime = scheduleData.startTime || st.startTime || localMatch?.startTime || "09:00";
-            const endTime = scheduleData.endTime || st.endTime || localMatch?.endTime || "10:00";
+            // localMatch reflects the most recent edit made directly on the Calendar
+            // page (drag-to-move, resize, etc.) and is kept in `plan_schedule_*`
+            // localStorage by persistPlanUpdate(). It must win over `scheduleData`,
+            // which is just a frozen snapshot of whatever the plan looked like at
+            // submission time — otherwise every refresh reverts a dragged/resized
+            // event (including the Lunch/Morning/Evening break slots) back to its
+            // original submitted time.
+            const startTime = (localMatch as any)?.startTime || scheduleData.startTime || st.startTime || "09:00";
+            const endTime = (localMatch as any)?.endTime || scheduleData.endTime || st.endTime || "10:00";
 
             return {
               ...st,
@@ -1070,6 +1542,33 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
     console.log(`Event drop completed`);
   };
 
+  // Dragging the bottom edge of an event pill to extend/shorten its duration.
+  const handleEventResize = (targetEvent: CalendarEvent, newEndTime: string): void => {
+    if (!targetEvent || !targetEvent.id) return;
+    if (newEndTime === targetEvent.endTime) return;
+
+    const updatedEvent = { ...targetEvent, endTime: newEndTime };
+    setEvents((prev) => prev.map((e) => (e.id === targetEvent.id ? updatedEvent : e)));
+
+    if (updatedEvent.source === "manual") {
+      if (user?.employeeCode) {
+        updateManualEvent(user.employeeCode, updatedEvent.id, updatedEvent).catch((err) =>
+          console.error("Failed to persist resized event to PMS:", err)
+        );
+      }
+    } else if (updatedEvent.source === "plan") {
+      persistPlanUpdate(user?.id, updatedEvent.date, updatedEvent);
+      syncPlanEventToPms(user?.employeeCode, updatedEvent);
+    }
+
+    syncEventToTimeEntry(updatedEvent);
+
+    toast({
+      title: "✅ Duration updated",
+      description: `${updatedEvent.title} now ends at ${newEndTime}`,
+    });
+  };
+
   // Google Calendar is owned by PMS. Connecting has to happen on PMS's
   // server (it holds the OAuth secret), so this just sends the user there.
   // After they come back, poll our own read-only status a few times to
@@ -1135,6 +1634,12 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
           existingEvent ? prev.map((event) => (event.id === saved.id ? saved : event)) : [...prev, saved]
         );
         syncEventToTimeEntry(saved);
+        saveEventGuests(user.employeeCode, saved.id, {
+          guests: nextEvent.guests || [],
+          guestsCanModify: !!nextEvent.guestsCanModify,
+          guestsCanInvite: nextEvent.guestsCanInvite !== false,
+          guestsCanSeeGuestList: nextEvent.guestsCanSeeGuestList !== false,
+        }).catch((err) => console.error("Failed to save guests:", err));
       } catch (err) {
         toast({
           title: "❌ Save failed",
@@ -1155,6 +1660,15 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
     if (nextEvent.source === "plan") {
       persistPlanUpdate(user?.id, existingEvent?.date, nextEvent);
       syncPlanEventToPms(user?.employeeCode, nextEvent);
+      if (user?.employeeCode) {
+        const guestKey = nextEvent.pmsId || nextEvent.id;
+        saveEventGuests(user.employeeCode, guestKey, {
+          guests: nextEvent.guests || [],
+          guestsCanModify: !!nextEvent.guestsCanModify,
+          guestsCanInvite: nextEvent.guestsCanInvite !== false,
+          guestsCanSeeGuestList: nextEvent.guestsCanSeeGuestList !== false,
+        }).catch((err) => console.error("Failed to save guests:", err));
+      }
     }
 
     syncEventToTimeEntry(nextEvent);
@@ -1182,6 +1696,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
             variant: "destructive",
           });
         }
+        deleteEventGuests(user.employeeCode, id);
       }
       setEvents((prev) => prev.filter((event) => event.id !== id));
       setModal(null);
@@ -1194,6 +1709,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
     if (target.source === "plan") {
       removePlanEvent(user?.id, target.date, target);
       removePlanEventFromPms(user?.employeeCode, target.pmsId);
+      if (user?.employeeCode) deleteEventGuests(user.employeeCode, target.pmsId || target.id);
     }
 
     setModal(null);
@@ -1325,7 +1841,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
         {/* Calendar body */}
         <div className="calendar-main-grid" style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
           {viewMode === "week" && (
-            <WeekGrid weekDays={weekDays} events={filteredEvents} onSlotClick={openNew} onEventClick={openEdit} today={today} />
+            <WeekGrid weekDays={weekDays} events={filteredEvents} onSlotClick={openNew} onEventClick={openEdit} onEventResize={handleEventResize} today={today} />
           )}
 
           {viewMode === "day" && (
@@ -1351,6 +1867,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
                   onSlotClick={openNew}
                   onEventClick={openEdit}
                   onEventDrop={handleEventDrop}
+                  onEventResize={handleEventResize}
                   isToday={isSameDay(selectedDate, today)}
                 />
               </div>
