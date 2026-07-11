@@ -6,11 +6,9 @@ import {
 } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import {
-  clearGoogleCalendarTokens,
-  getGoogleAuthUrl,
-  loadGoogleCalendarTokens,
-  saveGoogleCalendarTokens,
-  syncCalendarEventsToGoogle,
+  disconnectGoogle as disconnectPmsGoogle,
+  fetchGoogleStatus,
+  getPmsGoogleConnectUrl,
 } from "@/lib/googleCalendar";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -125,8 +123,6 @@ const EVENT_COLORS = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const getManualEventsKey = (userId?: string) => (userId ? `manual_calendar_events_${userId}` : null);
-
 const toMin = (t: string): number => {
   const [h, m] = t.split(":").map(Number);
   return (h || 0) * 60 + (m || 0);
@@ -189,19 +185,6 @@ const mergePlanEvents = (tasks: any[], fallbackDate: string) => {
   return Array.from(map.values());
 };
 
-const persistManualEvents = (userId: string | undefined, events: CalendarEvent[]) => {
-  const key = getManualEventsKey(userId);
-  if (!key) return;
-
-  const manualEvents = events.filter((event) => event.source === "manual");
-  if (manualEvents.length === 0) {
-    window.localStorage.removeItem(key);
-    return;
-  }
-
-  window.localStorage.setItem(key, JSON.stringify(manualEvents));
-};
-
 const persistPlanUpdate = (userId: string | undefined, originalDate: string | undefined, event: CalendarEvent) => {
   if (!userId) return;
 
@@ -251,6 +234,108 @@ const removePlanEvent = (userId: string | undefined, date: string | undefined, e
   const scheduleTasks = readStoredArray(scheduleKey);
 
   window.localStorage.setItem(scheduleKey, JSON.stringify(scheduleTasks.filter((task: any) => task.id !== event.id && task.pmsId !== event.pmsId)));
+};
+
+// ─── Manual event API (backed directly by PMS's calendar_events table) ───────
+// employeeCode (not Timestrap's internal user.id) is what PMS's calendar_events
+// actually resolves against — see server/pmsCalendarEvents.ts for why.
+
+const toApiEventBody = (employeeCode: string, event: Partial<CalendarEvent>) => ({
+  employeeCode,
+  title: event.title,
+  project: event.project,
+  date: event.date,
+  endDate: event.date,
+  startTime: event.startTime,
+  endTime: event.endTime,
+  colorIdx: event.colorIdx,
+});
+
+const fromApiEvent = (row: any): CalendarEvent => ({
+  id: row.id,
+  title: row.title,
+  project: row.project || "",
+  date: row.date,
+  startTime: row.startTime,
+  endTime: row.endTime,
+  colorIdx: row.colorIdx ?? 0,
+  source: "manual",
+  googleEventId: row.googleEventId || undefined,
+});
+
+const fetchManualEvents = async (employeeCode: string, date: string): Promise<CalendarEvent[]> => {
+  const res = await fetch(`/api/calendar-events?employeeCode=${encodeURIComponent(employeeCode)}&date=${encodeURIComponent(date)}`);
+  if (!res.ok) throw new Error("Failed to load calendar events");
+  const rows = await res.json();
+  return Array.isArray(rows) ? rows.map(fromApiEvent) : [];
+};
+
+const createManualEvent = async (employeeCode: string, event: Partial<CalendarEvent>): Promise<CalendarEvent> => {
+  const res = await fetch("/api/calendar-events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(toApiEventBody(employeeCode, event)),
+  });
+  if (!res.ok) throw new Error("Failed to create calendar event");
+  return fromApiEvent(await res.json());
+};
+
+const updateManualEvent = async (employeeCode: string, id: string, event: Partial<CalendarEvent>): Promise<CalendarEvent> => {
+  const res = await fetch(`/api/calendar-events/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(toApiEventBody(employeeCode, event)),
+  });
+  if (!res.ok) throw new Error("Failed to update calendar event");
+  return fromApiEvent(await res.json());
+};
+
+const deleteManualEvent = async (employeeCode: string, id: string): Promise<void> => {
+  const res = await fetch(`/api/calendar-events/${encodeURIComponent(id)}?employeeCode=${encodeURIComponent(employeeCode)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete calendar event");
+};
+
+const formatLastSynced = (isoString: string | null): string => {
+  if (!isoString) return "Synced by PMS — no sync yet";
+  const minutesAgo = Math.max(0, Math.round((Date.now() - new Date(isoString).getTime()) / 60000));
+  if (minutesAgo < 1) return "Last synced just now";
+  if (minutesAgo < 60) return `Last synced ${minutesAgo}m ago`;
+  const hoursAgo = Math.round(minutesAgo / 60);
+  return `Last synced ${hoursAgo}h ago`;
+};
+
+const syncPlanEventToPms = async (employeeCode: string | undefined, event: CalendarEvent) => {
+  if (!employeeCode || !event.pmsId) return;
+  try {
+    await fetch("/api/calendar-events/plan-sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        employeeCode,
+        taskId: event.pmsId,
+        title: event.title,
+        project: event.project,
+        date: event.date,
+        startTime: event.startTime,
+        endTime: event.endTime,
+      }),
+    });
+  } catch (err) {
+    console.error("Failed to sync plan event to PMS:", err);
+  }
+};
+
+const removePlanEventFromPms = async (employeeCode: string | undefined, taskId: string | undefined) => {
+  if (!employeeCode || !taskId) return;
+  try {
+    await fetch(`/api/calendar-events/plan-sync/${encodeURIComponent(taskId)}?employeeCode=${encodeURIComponent(employeeCode)}`, {
+      method: "DELETE",
+    });
+  } catch (err) {
+    console.error("Failed to remove synced plan event from PMS:", err);
+  }
 };
 
 const fmtHour = (h: number): string => {
@@ -768,8 +853,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [googleConnected, setGoogleConnected] = useState<boolean>(false);
   const [googleStatus, setGoogleStatus] = useState<string>("Not connected");
-  const [googleSyncing, setGoogleSyncing] = useState<boolean>(false);
-  const [autoSync, setAutoSync] = useState<boolean>(false);
+  const [googleLastSyncedAt, setGoogleLastSyncedAt] = useState<string | null>(null);
   const [draggedEvent, setDraggedEvent] = useState<CalendarEvent | null>(null);
 
   useEffect(() => {
@@ -791,11 +875,15 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
 
         if (!isMounted) return;
 
-        const manualEvents = readStoredArray(getManualEventsKey(user?.id)).map((event: any) => ({
-          ...event,
-          title: normalizeEventTitle(event.title, event.project),
-          source: "manual" as const,
-        }));
+        let manualEvents: CalendarEvent[] = [];
+        try {
+          manualEvents = (await fetchManualEvents(user.employeeCode, targetDate)).map((event) => ({
+            ...event,
+            title: normalizeEventTitle(event.title, event.project),
+          }));
+        } catch (err) {
+          console.error("Failed to load manual calendar events from PMS:", err);
+        }
 
         const scheduleKey = `plan_schedule_${user?.id}_${targetDate}`;
         const scheduleTasks = readStoredArray(scheduleKey);
@@ -857,27 +945,26 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
     };
   }, [selectedDate, user?.id]);
 
+  const refreshGoogleStatus = async () => {
+    if (!user?.id) {
+      setGoogleConnected(false);
+      setGoogleStatus("Not connected");
+      setGoogleLastSyncedAt(null);
+      return;
+    }
+    try {
+      const status = await fetchGoogleStatus(user.employeeCode);
+      setGoogleConnected(status.connected);
+      setGoogleStatus(status.connected ? `Connected${status.googleEmail ? ` (${status.googleEmail})` : ""}` : "Not connected");
+      setGoogleLastSyncedAt(status.lastSyncedAt || null);
+    } catch (err) {
+      console.error("Failed to load Google Calendar status:", err);
+      setGoogleStatus("Unable to load Google Calendar status");
+    }
+  };
+
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const storedTokens = loadGoogleCalendarTokens(user?.id);
-    setGoogleConnected(Boolean(storedTokens));
-    setGoogleStatus(storedTokens ? "Connected to Google Calendar" : "Not connected");
-
-    const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      if (event.data?.type !== "GOOGLE_CALENDAR_CONNECTED") return;
-
-      saveGoogleCalendarTokens(user?.id, event.data.tokens);
-      setGoogleConnected(true);
-      setGoogleStatus("Connected to Google Calendar");
-    };
-
-    window.addEventListener("message", handleMessage);
-
-    return () => {
-      window.removeEventListener("message", handleMessage);
-    };
+    refreshGoogleStatus();
   }, [user?.id]);
 
   const weekDays = useMemo<Date[]>(() => {
@@ -963,11 +1050,15 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
     setDraggedEvent(null);
 
     if (updatedEvent.source === "manual") {
-      console.log(`Persisting manual events with googleEventId: ${updatedEvent.googleEventId}`);
-      persistManualEvents(user?.id, updatedEvents.filter((e) => e.source === "manual"));
+      if (user?.employeeCode) {
+        updateManualEvent(user.employeeCode, updatedEvent.id, updatedEvent).catch((err) =>
+          console.error("Failed to persist dragged event to PMS:", err)
+        );
+      }
     } else if (updatedEvent.source === "plan") {
       console.log(`Persisting plan update with googleEventId: ${updatedEvent.googleEventId}`);
       persistPlanUpdate(user?.id, updatedEvent.date, updatedEvent);
+      syncPlanEventToPms(user?.employeeCode, updatedEvent);
     }
 
     syncEventToTimeEntry(updatedEvent);
@@ -979,15 +1070,19 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
     console.log(`Event drop completed`);
   };
 
-  const connectGoogleCalendar = async () => {
-    if (!user?.id) {
+  // Google Calendar is owned by PMS. Connecting has to happen on PMS's
+  // server (it holds the OAuth secret), so this just sends the user there.
+  // After they come back, poll our own read-only status a few times to
+  // pick up the change.
+  const connectGoogleCalendar = () => {
+    if (!user?.employeeCode) {
       setGoogleStatus("Sign in to connect Google Calendar.");
       return;
     }
 
     try {
-      const authUrl = await getGoogleAuthUrl();
-      const popup = window.open(authUrl, "timestrap-google-calendar", "width=520,height=700");
+      const connectUrl = getPmsGoogleConnectUrl(user.employeeCode);
+      const popup = window.open(connectUrl, "pms-google-calendar", "width=520,height=700");
       if (!popup) {
         setGoogleStatus("Popup blocked. Please allow popups and try again.");
         return;
@@ -997,114 +1092,69 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
       const poll = window.setInterval(() => {
         if (popup.closed) {
           window.clearInterval(poll);
-          setGoogleStatus(loadGoogleCalendarTokens(user.id) ? "Connected to Google Calendar" : "Not connected");
+          refreshGoogleStatus();
         }
-      }, 500);
-    } catch {
-      setGoogleStatus("Unable to connect Google Calendar.");
+      }, 1000);
+    } catch (err) {
+      setGoogleStatus(err instanceof Error ? err.message : "Unable to connect Google Calendar.");
     }
   };
 
-  const disconnectGoogleCalendar = () => {
-    clearGoogleCalendarTokens(user?.id);
-    setGoogleConnected(false);
-    setGoogleStatus("Not connected");
-  };
-
-  const syncGoogleCalendar = async () => {
-    if (!user?.id) {
-      setGoogleStatus("Sign in to sync Google Calendar.");
-      return;
-    }
-
-    if (!googleConnected) {
-      setGoogleStatus("Connect Google Calendar first.");
-      return;
-    }
-
-    const syncableEvents = events
-      .filter((event) => event.source !== "google")
-      .map((event) => ({
-        ...event,
-        title: normalizeEventTitle(event.title, event.project),
-      }));
-    console.log(`Found ${syncableEvents.length} syncable events`);
-    syncableEvents.forEach(evt => {
-      console.log(`  - ${evt.title} (${evt.startTime}-${evt.endTime}) googleEventId: ${evt.googleEventId || 'NONE'}`);
-    });
-
-    // Track events with googleEventId (for detecting deleted events)
-    const eventsWithGoogleId = syncableEvents.filter(e => e.googleEventId);
-    const eventsWithoutGoogleId = syncableEvents.filter(e => !e.googleEventId);
-    console.log(`  Events with existing googleEventId (may have been deleted from Google): ${eventsWithGoogleId.length}`);
-    console.log(`  Events without googleEventId (new): ${eventsWithoutGoogleId.length}`);
-    if (syncableEvents.length === 0) {
-      setGoogleStatus("No events to sync.");
-      return;
-    }
-
-    setGoogleSyncing(true);
-    setGoogleStatus("Syncing to Google Calendar...");
-
+  const disconnectGoogleCalendar = async () => {
     try {
-      const synced = await syncCalendarEventsToGoogle(user.id, syncableEvents);
-      const syncedMap = new Map(synced.map((item) => [item.id, item.googleEventId]));
-      const nextEvents = events.map((event) => {
-        const googleEventId = syncedMap.get(event.id);
-        return googleEventId ? { ...event, googleEventId } : event;
-      });
-
-      setEvents(nextEvents);
-      persistManualEvents(user?.id, nextEvents.filter((event) => event.source === "manual"));
-      nextEvents.filter((event) => event.source === "plan").forEach((event) => {
-        persistPlanUpdate(user?.id, events.find((current) => current.id === event.id)?.date, event);
-      });
-      const syncedCount = synced.length;
-      setGoogleStatus("Synced to Google Calendar.");
+      await disconnectPmsGoogle(user?.employeeCode);
+      setGoogleConnected(false);
+      setGoogleStatus("Not connected");
+      setGoogleLastSyncedAt(null);
+    } catch (err) {
       toast({
-        title: "✅ Sync Complete",
-        description: `Successfully synced ${syncedCount} event${syncedCount !== 1 ? 's' : ''} to Google Calendar.`,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to sync Google Calendar.";
-      setGoogleStatus(message);
-      toast({
-        title: "❌ Sync Failed",
-        description: message,
+        title: "❌ Disconnect failed",
+        description: err instanceof Error ? err.message : "Unable to disconnect Google Calendar.",
         variant: "destructive",
       });
-    } finally {
-      setGoogleSyncing(false);
     }
   };
 
-  // Auto-sync: trigger syncGoogleCalendar every 5 seconds when enabled
-  useEffect(() => {
-    if (!autoSync || !googleConnected || !user?.id) return;
-    // Sync immediately on enable
-    syncGoogleCalendar();
-    const interval = setInterval(() => {
-      syncGoogleCalendar();
-    }, 5 * 1000);
-    return () => clearInterval(interval);
-  }, [autoSync, googleConnected, user?.id]);
-
-  const saveEvent = (evt: CalendarEvent): void => {
+  const saveEvent = async (evt: CalendarEvent): Promise<void> => {
     const existingEvent = events.find((event) => event.id === evt.id);
     const normalizedTitle = normalizeEventTitle(evt.title, evt.project);
     const nextEvent = existingEvent
       ? { ...evt, title: normalizedTitle, googleEventId: existingEvent.googleEventId, source: evt.source || existingEvent.source }
       : { ...evt, title: normalizedTitle };
+
+    if (nextEvent.source === "manual") {
+      if (!user?.employeeCode) {
+        setModal(null);
+        return;
+      }
+      try {
+        const saved = existingEvent
+          ? await updateManualEvent(user.employeeCode, nextEvent.id, nextEvent)
+          : await createManualEvent(user.employeeCode, nextEvent);
+        setEvents((prev) =>
+          existingEvent ? prev.map((event) => (event.id === saved.id ? saved : event)) : [...prev, saved]
+        );
+        syncEventToTimeEntry(saved);
+      } catch (err) {
+        toast({
+          title: "❌ Save failed",
+          description: err instanceof Error ? err.message : "Unable to save event.",
+          variant: "destructive",
+        });
+      }
+      setModal(null);
+      return;
+    }
+
     const nextEvents = existingEvent
       ? events.map((event) => (event.id === evt.id ? nextEvent : event))
       : [...events, nextEvent];
 
     setEvents(nextEvents);
 
-    if (nextEvent.source === "manual") {
-      persistManualEvents(user?.id, nextEvents);
-    } else if (nextEvent.source === "plan") {
+    if (nextEvent.source === "plan") {
       persistPlanUpdate(user?.id, existingEvent?.date, nextEvent);
+      syncPlanEventToPms(user?.employeeCode, nextEvent);
     }
 
     syncEventToTimeEntry(nextEvent);
@@ -1112,7 +1162,7 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
     setModal(null);
   };
 
-  const deleteEvent = (id: string): void => {
+  const deleteEvent = async (id: string): Promise<void> => {
     const target = events.find((event) => event.id === id);
 
     if (!target) {
@@ -1121,13 +1171,29 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
       return;
     }
 
+    if (target.source === "manual") {
+      if (user?.employeeCode) {
+        try {
+          await deleteManualEvent(user.employeeCode, id);
+        } catch (err) {
+          toast({
+            title: "❌ Delete failed",
+            description: err instanceof Error ? err.message : "Unable to delete event.",
+            variant: "destructive",
+          });
+        }
+      }
+      setEvents((prev) => prev.filter((event) => event.id !== id));
+      setModal(null);
+      return;
+    }
+
     const nextEvents = events.filter((event) => event.id !== id);
     setEvents(nextEvents);
 
-    if (target.source === "manual") {
-      persistManualEvents(user?.id, nextEvents);
-    } else if (target.source === "plan") {
+    if (target.source === "plan") {
       removePlanEvent(user?.id, target.date, target);
+      removePlanEventFromPms(user?.employeeCode, target.pmsId);
     }
 
     setModal(null);
@@ -1187,43 +1253,11 @@ export default function CalendarViewPage({ user }: CalendarViewPageProps) {
               >
                 {googleConnected ? "Disconnect Google" : "Connect Google Calendar"}
               </button>
-              <button
-                onClick={syncGoogleCalendar}
-                disabled={!googleConnected || googleSyncing}
-                style={{
-                  border: "1px solid #dadce0",
-                  borderRadius: 6,
-                  background: googleConnected ? "#0f9d58" : "#f1f3f4",
-                  color: googleConnected ? "#fff" : "#70757a",
-                  padding: "8px 12px",
-                  cursor: googleConnected && !googleSyncing ? "pointer" : "not-allowed",
-                  fontSize: 13,
-                  fontWeight: 500,
-                }}
-              >
-                {googleSyncing ? "Syncing..." : "Sync schedules"}
-              </button>
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontSize: 13,
-                  color: "#3c4043",
-                  cursor: googleConnected ? "pointer" : "not-allowed",
-                  opacity: googleConnected ? 1 : 0.5,
-                  padding: "4px 0",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={autoSync}
-                  onChange={(e) => setAutoSync(e.target.checked)}
-                  disabled={!googleConnected}
-                  style={{ accentColor: "#1a73e8", width: 16, height: 16 }}
-                />
-                Auto-sync every 5 sec
-              </label>
+              {googleConnected && (
+                <div style={{ fontSize: 12, color: "#70757a", padding: "4px 0" }}>
+                  {formatLastSynced(googleLastSyncedAt)}
+                </div>
+              )}
             </div>
           </div>
 

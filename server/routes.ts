@@ -7,7 +7,16 @@ import fsSync from "fs";
 import path from "path";   // ✅ KEEP THIS
 import { pool } from "./db";
 import { pmsPool, saveSiteReportToPMS, getTasks, type PMSTask } from "./pmsSupabase";
-import { getLMSHours } from "./lmsSupabase";
+import {
+  getCalendarEvents as getPmsCalendarEvents,
+  createCalendarEvent as createPmsCalendarEvent,
+  updateCalendarEvent as updatePmsCalendarEvent,
+  deleteCalendarEvent as deletePmsCalendarEvent,
+  upsertPlanCalendarEvent as upsertPmsPlanCalendarEvent,
+  deletePlanCalendarEvent as deletePmsPlanCalendarEvent,
+  getGoogleStatus as getPmsGoogleStatus,
+  disconnectGoogle as disconnectPmsGoogle,
+} from "./pmsCalendarEvents";import { getLMSHours } from "./lmsSupabase";
 import { registerVoiceRoutes } from "./voice";
 import { format, parseISO, eachDayOfInterval, isSameDay } from "date-fns";
 import { sendEmail } from "./email";
@@ -620,6 +629,119 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Create subtask error:", error);
       res.status(500).json({ error: "Failed to create subtask" });
+    }
+  });
+
+  // ============ CALENDAR EVENTS (backed directly by PMS's Postgres DB) ============
+  // Note: only "manual" calendar events go through here. Timestrap's
+  // separate daily-plan scheduling system is untouched.
+  //
+  // NOTE: uses employeeCode (not Timestrap's internal user id) — that's what
+  // PMS's calendar_events.user_id actually resolves against. See
+  // pmsCalendarEvents.ts for why.
+  app.get("/api/calendar-events", async (req, res) => {
+    try {
+      const { employeeCode, date } = req.query;
+      if (!employeeCode) return res.status(400).json({ error: "employeeCode is required" });
+      const events = await getPmsCalendarEvents(employeeCode as string, date as string | undefined);
+      res.json(events);
+    } catch (error) {
+      console.error("Get PMS calendar events error:", error);
+      res.status(500).json({ error: "Failed to fetch calendar events" });
+    }
+  });
+
+  app.post("/api/calendar-events", async (req, res) => {
+    try {
+      const { employeeCode, ...evt } = req.body;
+      if (!employeeCode) return res.status(400).json({ error: "employeeCode is required" });
+      const created = await createPmsCalendarEvent(employeeCode, evt);
+      if (!created) return res.status(404).json({ error: "No matching PMS user account found for this employee code" });
+      res.status(201).json(created);
+    } catch (error) {
+      console.error("Create PMS calendar event error:", error);
+      res.status(500).json({ error: "Failed to create calendar event" });
+    }
+  });
+
+  app.put("/api/calendar-events/:id", async (req, res) => {
+    try {
+      const { employeeCode, ...evt } = req.body;
+      if (!employeeCode) return res.status(400).json({ error: "employeeCode is required" });
+      const updated = await updatePmsCalendarEvent(req.params.id, employeeCode, evt);
+      if (!updated) return res.status(404).json({ error: "Event not found" });
+      res.json(updated);
+    } catch (error) {
+      console.error("Update PMS calendar event error:", error);
+      res.status(500).json({ error: "Failed to update calendar event" });
+    }
+  });
+
+  app.delete("/api/calendar-events/:id", async (req, res) => {
+    try {
+      const { employeeCode } = req.query;
+      if (!employeeCode) return res.status(400).json({ error: "employeeCode is required" });
+      const deleted = await deletePmsCalendarEvent(req.params.id, employeeCode as string);
+      if (!deleted) return res.status(404).json({ error: "Event not found" });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete PMS calendar event error:", error);
+      res.status(500).json({ error: "Failed to delete calendar event" });
+    }
+  });
+
+  // ============ PLAN-FOR-THE-DAY EVENTS: shared with PMS ============
+  // Written on plan submission, and kept in sync when a plan task is
+  // edited/dragged/deleted on the Calendar page.
+  app.post("/api/calendar-events/plan-sync", async (req, res) => {
+    try {
+      const { employeeCode, taskId, title, project, date, startTime, endTime } = req.body;
+      if (!employeeCode || !taskId) return res.status(400).json({ error: "employeeCode and taskId are required" });
+      const synced = await upsertPmsPlanCalendarEvent(employeeCode, { taskId, title, project, date, startTime, endTime });
+      res.json(synced);
+    } catch (error) {
+      console.error("Plan calendar sync error:", error);
+      res.status(500).json({ error: "Failed to sync plan event to PMS" });
+    }
+  });
+
+  app.delete("/api/calendar-events/plan-sync/:taskId", async (req, res) => {
+    try {
+      const { employeeCode } = req.query;
+      if (!employeeCode) return res.status(400).json({ error: "employeeCode is required" });
+      await deletePmsPlanCalendarEvent(employeeCode as string, req.params.taskId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Plan calendar delete-sync error:", error);
+      res.status(500).json({ error: "Failed to remove synced plan event from PMS" });
+    }
+  });
+
+  // ============ GOOGLE CALENDAR STATUS (read-only, backed by PMS's DB) ============
+  // Connecting Google still has to happen on PMS's server (it holds the
+  // OAuth client secret) — the client links out to PMS's own connect URL.
+  // Disconnect is a plain DB delete, so it's safe to do from here directly.
+  app.get("/api/google/status", async (req, res) => {
+    try {
+      const { employeeCode } = req.query;
+      if (!employeeCode) return res.status(400).json({ error: "employeeCode is required" });
+      const status = await getPmsGoogleStatus(employeeCode as string);
+      res.json(status);
+    } catch (error) {
+      console.error("Get PMS Google status error:", error);
+      res.status(500).json({ error: "Failed to fetch Google Calendar status" });
+    }
+  });
+
+  app.post("/api/google/disconnect", async (req, res) => {
+    try {
+      const { employeeCode } = req.body;
+      if (!employeeCode) return res.status(400).json({ error: "employeeCode is required" });
+      await disconnectPmsGoogle(employeeCode);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Disconnect PMS Google error:", error);
+      res.status(500).json({ error: "Failed to disconnect Google Calendar" });
     }
   });
 
@@ -2403,6 +2525,31 @@ export async function registerRoutes(
                 taskDescription: t.task_name
               } as any);
             }
+          }
+        }
+      }
+
+      // Mirror the submitted plan into PMS's shared calendar_events table so
+      // it shows up immediately in both Timestrap's and PMS's calendar views.
+      // Best-effort: a failure here shouldn't block the plan submission itself.
+      if (employee?.employeeCode) {
+        for (const t of selectedTasks) {
+          const tStart = t.scheduleData?.startTime || t.startTime || null;
+          const tEnd = t.scheduleData?.endTime || t.endTime || null;
+          if (!tStart || !tEnd) continue; // skip tasks without a scheduled time slot
+          if (!t.id || t.id.startsWith('planned-') || t.id.startsWith('break-')) continue; // not a real PMS task id
+
+          try {
+            await upsertPmsPlanCalendarEvent(employee.employeeCode, {
+              taskId: t.id,
+              title: t.task_name,
+              project: t.projectName || t.project_code,
+              date: planDate,
+              startTime: tStart,
+              endTime: tEnd,
+            });
+          } catch (pmsSyncError) {
+            console.error(`Failed to sync plan task ${t.id} to PMS calendar:`, pmsSyncError);
           }
         }
       }

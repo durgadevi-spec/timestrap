@@ -334,7 +334,7 @@ export function registerGoogleCalendarRoutes(app: Express) {
         const refreshErrorMsg = refreshError instanceof Error ? refreshError.message : "Unknown error";
         if (refreshErrorMsg.includes("invalid_grant")) {
           console.error("[google-calendar] Invalid or expired refresh token. User needs to re-authenticate.");
-          return res.status(401).json({ 
+          return res.status(401).json({
             error: "Your Google Calendar connection has expired. Please disconnect and reconnect your Google Calendar account.",
             code: "AUTH_EXPIRED"
           });
@@ -355,14 +355,14 @@ export function registerGoogleCalendarRoutes(app: Express) {
               // Try to update existing event
               console.log(`[google-calendar] 🔄 PATCH request for ${event.id}: googleEventId=${event.googleEventId}`);
               console.log(`[google-calendar] PATCH payload:`, JSON.stringify(payload, null, 2));
-              
+
               const updated = await googleCalendarRequest(
                 `/calendars/primary/events/${encodeURIComponent(event.googleEventId)}`,
                 effectiveAccessToken,
                 "PATCH",
                 payload
               );
-              
+
               console.log(`[google-calendar] ✅ PATCH response for ${event.id}:`, JSON.stringify(updated, null, 2));
               synced.push({ id: event.id, googleEventId: updated.id });
               console.log(`[google-calendar] ✅ Updated event ${event.id} (googleEventId: ${event.googleEventId}) -> ${updated.id}`);
@@ -389,7 +389,7 @@ export function registerGoogleCalendarRoutes(app: Express) {
               console.log(`[google-calendar] POST payload for ${event.id}:`, JSON.stringify(payload, null, 2));
               const created = await googleCalendarRequest("/calendars/primary/events", effectiveAccessToken, "POST", payload);
               console.log(`[google-calendar] POST response for ${event.id}:`, JSON.stringify(created, null, 2));
-              
+
               if (!created || !created.id) {
                 console.error(`[google-calendar] POST response missing event id for ${event.id}. Response:`, created);
                 failed.push({ id: event.id, error: "Google Calendar returned empty response" });

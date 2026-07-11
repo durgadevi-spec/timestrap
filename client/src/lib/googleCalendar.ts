@@ -1,140 +1,51 @@
-export interface GoogleCalendarTokens {
-  accessToken: string;
-  refreshToken?: string;
-  expiresAt: number;
+// client/src/lib/googleCalendar.ts
+//
+// Google Calendar connection is now owned entirely by PMS. This module
+// no longer stores tokens in localStorage or pushes events to Google
+// directly — it just reads read-only status from Timestrap's own
+// /api/google/status endpoint (which reads PMS's DB directly) and links
+// out to PMS's server to start/manage the actual OAuth connection, since
+// only PMS's server holds the Google OAuth client secret.
+
+export interface GoogleStatus {
+  connected: boolean;
+  googleEmail?: string;
+  lastSyncedAt?: string | null;
 }
 
-const GOOGLE_TOKENS_KEY_PREFIX = "google_calendar_tokens_";
+export async function fetchGoogleStatus(employeeCode?: string): Promise<GoogleStatus> {
+  if (!employeeCode) return { connected: false };
 
-export function getGoogleCalendarStorageKey(userId?: string) {
-  if (!userId) return null;
-  return `${GOOGLE_TOKENS_KEY_PREFIX}${userId}`;
-}
-
-export function loadGoogleCalendarTokens(userId?: string): GoogleCalendarTokens | null {
-  const key = getGoogleCalendarStorageKey(userId);
-  if (!key || typeof window === "undefined") return null;
-
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw) as GoogleCalendarTokens;
-    if (!parsed?.accessToken || !parsed?.expiresAt) {
-      return null;
-    }
-
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-export function saveGoogleCalendarTokens(userId: string | undefined, tokens: GoogleCalendarTokens | null) {
-  const key = getGoogleCalendarStorageKey(userId);
-  if (!key || typeof window === "undefined") return;
-
-  if (!tokens) {
-    window.localStorage.removeItem(key);
-    return;
-  }
-
-  window.localStorage.setItem(key, JSON.stringify(tokens));
-}
-
-export function clearGoogleCalendarTokens(userId?: string) {
-  saveGoogleCalendarTokens(userId, null);
-}
-
-export async function getGoogleAuthUrl() {
-  const response = await fetch("/api/google/auth/url");
-
+  const response = await fetch(`/api/google/status?employeeCode=${encodeURIComponent(employeeCode)}`);
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Unable to prepare Google authentication.");
+    throw new Error("Unable to fetch Google Calendar status.");
   }
-
-  const data = (await response.json()) as { url: string };
-  return data.url;
+  return (await response.json()) as GoogleStatus;
 }
 
-export async function refreshGoogleAccessToken(refreshToken: string) {
-  const response = await fetch("/api/google/auth/refresh", {
+export async function disconnectGoogle(employeeCode?: string): Promise<void> {
+  if (!employeeCode) return;
+
+  const response = await fetch("/api/google/disconnect", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ refreshToken }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ employeeCode }),
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Unable to refresh Google access token.");
+    throw new Error("Unable to disconnect Google Calendar.");
   }
-
-  const data = (await response.json()) as GoogleCalendarTokens;
-  return data;
 }
 
-export async function ensureGoogleCalendarTokens(userId?: string) {
-  const tokens = loadGoogleCalendarTokens(userId);
-  if (!tokens) return null;
-
-  if (Date.now() < tokens.expiresAt - 60_000) {
-    return tokens;
+// PMS's server is the only thing that can start the OAuth flow (it holds
+// the Google client secret). This just builds the URL to send the user to.
+// Set VITE_PMS_APP_URL to PMS's public base URL (e.g. https://pms.example.com).
+export function getPmsGoogleConnectUrl(employeeCode?: string): string {
+  const pmsBaseUrl = (import.meta as any).env?.VITE_PMS_APP_URL || "";
+  if (!pmsBaseUrl) {
+    throw new Error(
+      "VITE_PMS_APP_URL is not configured — set it to PMS's public URL to enable connecting Google Calendar."
+    );
   }
-
-  if (!tokens.refreshToken) {
-    throw new Error("Google Calendar needs to reconnect because the saved refresh token is missing.");
-  }
-
-  const refreshed = await refreshGoogleAccessToken(tokens.refreshToken);
-  saveGoogleCalendarTokens(userId, refreshed);
-  return refreshed;
-}
-
-interface GoogleCalendarSyncResponse {
-  success: boolean;
-  synced: Array<{ id: string; googleEventId: string }>;
-}
-
-interface CalendarEventShape {
-  id: string;
-  title: string;
-  project: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-  colorIdx: number;
-  source?: "plan" | "manual" | "google";
-  pmsId?: string;
-  googleEventId?: string;
-}
-
-export async function syncCalendarEventsToGoogle(userId: string | undefined, events: CalendarEventShape[]) {
-  const tokens = await ensureGoogleCalendarTokens(userId);
-  if (!tokens) {
-    throw new Error("Google Calendar is not connected.");
-  }
-
-  const response = await fetch("/api/google/calendar/events", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      action: "sync",
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      events,
-    }),
-  });
-
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Unable to sync with Google Calendar.");
-  }
-
-  const data = (await response.json()) as GoogleCalendarSyncResponse;
-  return data.synced;
+  return `${pmsBaseUrl.replace(/\/$/, "")}/api/google/connect`;
 }
