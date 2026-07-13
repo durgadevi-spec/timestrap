@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest, queryClient } from '@/lib/queryClient';
-import { CheckCircle2, Circle, ArrowRight, ArrowLeft, Send, AlertTriangle, Clock, Calendar as CalendarIcon, ClipboardList, Target, Power, PowerOff, Lock, ArrowUp, ArrowDown, Search as PlannedTaskSearchIcon, ChevronUp, ChevronDown } from 'lucide-react';
+import { CheckCircle2, Circle, ArrowRight, ArrowLeft, Send, AlertTriangle, Clock, Calendar as CalendarIcon, ClipboardList, Target, Power, PowerOff, Lock, ArrowUp, ArrowDown, Search as PlannedTaskSearchIcon, ChevronUp, ChevronDown, Minus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format, addDays } from 'date-fns';
 import { Input } from '@/components/ui/input';
@@ -333,29 +333,29 @@ export default function PlanForDayPage() {
     if (!planStatus?.submitted && selectedTasks.length === 0) {
       const autoTasks = availableTasks.filter((task: any) => task.isAutoSelected);
       const breaks = [
-        { 
-          id: 'break-morning', 
-          task_name: 'Morning Break', 
-          projectName: 'Break', 
-          isBreak: true, 
+        {
+          id: 'break-morning',
+          task_name: 'Morning Break',
+          projectName: 'Break',
+          isBreak: true,
           durationMinutes: 15,
           startTime: '11:00',
           endTime: '11:15'
         },
-        { 
-          id: 'break-lunch', 
-          task_name: 'Lunch', 
-          projectName: 'Break', 
-          isBreak: true, 
+        {
+          id: 'break-lunch',
+          task_name: 'Lunch',
+          projectName: 'Break',
+          isBreak: true,
           durationMinutes: 30,
           startTime: '14:00',
           endTime: '14:30'
         },
-        { 
-          id: 'break-evening', 
-          task_name: 'Evening Break', 
-          projectName: 'Break', 
-          isBreak: true, 
+        {
+          id: 'break-evening',
+          task_name: 'Evening Break',
+          projectName: 'Break',
+          isBreak: true,
           durationMinutes: 15,
           startTime: '17:00',
           endTime: '17:15'
@@ -418,9 +418,9 @@ export default function PlanForDayPage() {
 
   const filteredAvailableTasks = availableTasks.filter((task: any) => {
     const matchesSearch = task.task_name.toLowerCase().includes(assignedTaskSearch.toLowerCase()) ||
-                          task.projectName.toLowerCase().includes(assignedTaskSearch.toLowerCase());
+      task.projectName.toLowerCase().includes(assignedTaskSearch.toLowerCase());
     const matchesProject = projectSearch === '' || task.projectName === projectSearch;
-    
+
     // Filter for "My Tasks" - only show tasks assigned to current user or containing user's name
     let matchesViewType = true;
     if (adminViewType === 'my-tasks') {
@@ -428,12 +428,12 @@ export default function PlanForDayPage() {
       const userName = user?.name || '';
       const taskAssignedTo = task.assignedTo || '';
       const taskName = task.task_name?.toLowerCase() || '';
-      
-      matchesViewType = taskAssignedTo === userCode || 
-                       taskName.includes(userName.toLowerCase()) ||
-                       task.isAssignedToEmployee === true;
+
+      matchesViewType = taskAssignedTo === userCode ||
+        taskName.includes(userName.toLowerCase()) ||
+        task.isAssignedToEmployee === true;
     }
-    
+
     return matchesSearch && matchesProject && matchesViewType && !task.isAutoSelected;
   });
 
@@ -489,6 +489,29 @@ export default function PlanForDayPage() {
         return prev;
       }
       return buildScheduledTasks(prev.filter(current => current.instanceId !== instanceId));
+    });
+  };
+
+  // Remove a single instance of a task by taskId (used by the "-" button on the
+  // Available Tasks card in the left panel). Removes the last matching,
+  // non-locked instance so repeated clicks decrement the selection count.
+  const removeOneInstance = (taskId: string) => {
+    setSelectedTasks(prev => {
+      let lastIdx = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i].id === taskId && !prev[i].isLocked) {
+          lastIdx = i;
+          break;
+        }
+      }
+      if (lastIdx === -1) {
+        toast({
+          title: 'Task Locked',
+          description: 'This is a PMS scheduled task and cannot be removed.',
+        });
+        return prev;
+      }
+      return buildScheduledTasks(prev.filter((_, i) => i !== lastIdx));
     });
   };
 
@@ -653,7 +676,7 @@ export default function PlanForDayPage() {
                     <Input placeholder="Search tasks..." value={assignedTaskSearch} onChange={(e) => setAssignedTaskSearch(e.target.value)} className="bg-slate-950/50 border-slate-800 pl-10 h-10" />
                   </div>
                   <div className="relative flex-1 z-30" data-project-dropdown>
-                    <button 
+                    <button
                       onClick={() => setIsProjectDropdownOpen(!isProjectDropdownOpen)}
                       className="w-full h-10 rounded-md border border-slate-800 bg-slate-950/50 px-3 py-2 text-sm text-slate-200 outline-none cursor-pointer focus:border-blue-500 focus:ring-1 focus:ring-blue-500 flex items-center justify-between hover:border-slate-700 transition-colors"
                     >
@@ -666,8 +689,8 @@ export default function PlanForDayPage() {
                         left: 'var(--dropdown-left)',
                       }}>
                         <div className="p-3 border-b border-slate-700">
-                          <Input 
-                            placeholder="Search projects..." 
+                          <Input
+                            placeholder="Search projects..."
                             value={projectDropdownSearch}
                             onChange={(e) => setProjectDropdownSearch(e.target.value)}
                             className="bg-slate-950 border-slate-700 h-9 text-sm placeholder-slate-500"
@@ -695,11 +718,10 @@ export default function PlanForDayPage() {
                                     setIsProjectDropdownOpen(false);
                                     setProjectDropdownSearch('');
                                   }}
-                                  className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
-                                    projectSearch === p 
-                                      ? 'bg-blue-600/40 text-blue-200 font-semibold' 
-                                      : 'text-slate-300 hover:bg-slate-800'
-                                  }`}
+                                  className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${projectSearch === p
+                                    ? 'bg-blue-600/40 text-blue-200 font-semibold'
+                                    : 'text-slate-300 hover:bg-slate-800'
+                                    }`}
                                 >
                                   {p as string}
                                 </button>
@@ -728,24 +750,22 @@ export default function PlanForDayPage() {
                     const isSelected = selectionCount > 0;
                     const isLimitReached = selectionCount >= 10;
                     return (
-                      <motion.div 
-                        key={task.id} 
-                        className={`p-5 rounded-2xl border flex items-center gap-4 transition-all ${
-                          isLimitReached 
-                            ? 'bg-slate-900/50 border-slate-800/30 opacity-50 cursor-not-allowed' 
-                            : isSelected 
-                              ? 'bg-blue-600/20 border-blue-500/50 cursor-pointer hover:bg-blue-600/30' 
-                              : 'bg-slate-800/40 border-slate-700/50 cursor-pointer hover:bg-slate-800/60'
-                        }`} 
+                      <motion.div
+                        key={task.id}
+                        className={`p-5 rounded-2xl border flex items-center gap-4 transition-all ${isLimitReached
+                          ? 'bg-slate-900/50 border-slate-800/30 opacity-50 cursor-not-allowed'
+                          : isSelected
+                            ? 'bg-blue-600/20 border-blue-500/50 cursor-pointer hover:bg-blue-600/30'
+                            : 'bg-slate-800/40 border-slate-700/50 cursor-pointer hover:bg-slate-800/60'
+                          }`}
                         onClick={() => !isLimitReached && addTask(task)}
                       >
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 ${
-                          isLimitReached
-                            ? 'bg-slate-800 border-slate-700 text-slate-600'
-                            : isSelected 
-                              ? 'bg-blue-500 border-blue-400 text-white' 
-                              : 'bg-slate-900 border-slate-800 text-slate-700'
-                        }`}>
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 ${isLimitReached
+                          ? 'bg-slate-800 border-slate-700 text-slate-600'
+                          : isSelected
+                            ? 'bg-blue-500 border-blue-400 text-white'
+                            : 'bg-slate-900 border-slate-800 text-slate-700'
+                          }`}>
                           {isLimitReached ? <AlertTriangle className="w-5 h-5" /> : (isSelected ? <span className="font-black text-sm">{selectionCount}</span> : <Circle className="w-6 h-6" />)}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -759,6 +779,19 @@ export default function PlanForDayPage() {
                           </h3>
                           <p className="text-xs text-slate-500 font-bold uppercase truncate">{task.projectName}</p>
                         </div>
+                        {isSelected && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 rounded-lg text-red-400 hover:bg-red-400/10 shrink-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeOneInstance(task.id);
+                            }}
+                          >
+                            <Minus className="w-4 h-4" />
+                          </Button>
+                        )}
                       </motion.div>
                     );
                   })}
@@ -839,7 +872,7 @@ export default function PlanForDayPage() {
               </ScrollArea>
               <div className="p-4 bg-slate-900/50 border-t border-slate-800 flex flex-col gap-4 shrink-0">
                 <div className="space-y-2">
-                  <div 
+                  <div
                     className="flex items-center justify-between cursor-pointer hover:bg-slate-800/50 p-1 -mx-1 rounded transition-colors"
                     onClick={() => setIsCalendarPreviewOpen(!isCalendarPreviewOpen)}
                   >
@@ -875,7 +908,7 @@ export default function PlanForDayPage() {
                     <AlertTriangle className="w-4 h-4" />
                     <span>TASKS MUST BE COMPLETED TODAY. (Total: {Math.floor(totalWorkingMinutes / 60)}h {totalWorkingMinutes % 60}m)</span>
                   </div>
-                  <Button 
+                  <Button
                     className={`w-full h-12 text-sm font-bold rounded-xl transition-all shadow-lg shadow-blue-900/20 ${isValidPlan ? 'bg-blue-600 hover:bg-blue-500 hover:scale-[1.02] text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
                     disabled={!isValidPlan || !isWindowOpen}
                     onClick={handleNext}
