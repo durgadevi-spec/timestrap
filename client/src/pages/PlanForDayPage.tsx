@@ -831,9 +831,7 @@ export default function PlanForDayPage() {
                         <div className="flex gap-2">
                           <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-800" onClick={() => reorderTask(task.instanceId, 'up')} disabled={index === 0}><ArrowUp className="w-4 h-4" /></Button>
                           <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-800" onClick={() => reorderTask(task.instanceId, 'down')} disabled={index === selectedTasks.length - 1}><ArrowDown className="w-4 h-4" /></Button>
-                          {!task.isAutoSelected && (
-                            <Button variant="ghost" size="sm" onClick={() => removeTask(task.instanceId)} className="text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-xl">Cancel</Button>
-                          )}
+                          <Button variant="ghost" size="sm" onClick={() => removeTask(task.instanceId)} className="text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-xl">Cancel</Button>
                         </div>
                       </div>
 
