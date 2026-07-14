@@ -145,7 +145,7 @@ export function serializeCalendarEventDbValues(evt: Partial<PmsCalendarEvent> = 
   if (hasField("guests")) payload.guests = JSON.stringify(Array.isArray(evt.guests) ? evt.guests : []);
   if (hasField("projectId") && (evt as any).projectId) payload.project_id = (evt as any).projectId;
   if (hasField("taskId") && (evt as any).taskId) payload.task_id = (evt as any).taskId;
-  
+
   payload.metadata = buildCalendarEventMetadata(evt);
   return payload;
 }
@@ -478,7 +478,11 @@ export async function deleteCalendarEvent(id: string, employeeCode: string): Pro
 // a plan task is edited/dragged/deleted on the Calendar page. Matched on
 // task_id so re-saving updates the same row instead of duplicating it.
 
-export async function upsertPlanCalendarEvent(employeeCode: string, evt: Partial<PmsCalendarEvent> & { taskId: string }): Promise<PmsCalendarEvent | null> {
+export async function upsertPlanCalendarEvent(
+  employeeCode: string,
+  evt: Partial<PmsCalendarEvent> & { taskId: string },
+  options: { matchBySlot?: boolean } = {}
+): Promise<PmsCalendarEvent | null> {
   if (!evt.taskId) return null;
   const pmsUserId = await resolvePmsUserId(employeeCode);
   if (!pmsUserId) return null;
@@ -486,10 +490,27 @@ export async function upsertPlanCalendarEvent(employeeCode: string, evt: Partial
   const taskUuid = toTaskUuid(evt.taskId);
   const selectColumns = await getCalendarEventSelectColumns();
 
-  const existing = await pmsPool.query(
-    `SELECT id FROM calendar_events WHERE user_id = $1 AND task_id = $2 AND calendar_type = 'task'`,
-    [pmsUserId, taskUuid]
-  );
+  // Two matching strategies:
+  //  - task-only (default): used by the Calendar page's drag/edit-in-place
+  //    sync, where a single task's event should be found and moved no
+  //    matter what date/time it's dragged to.
+  //  - slot (date + start_time): used on plan submission, where the SAME
+  //    PMS task can legitimately appear on multiple days (recurring /
+  //    mandatory tasks) or more than once in the same day's plan at
+  //    different times. Matching on task_id alone in that case made every
+  //    later occurrence overwrite the previous one, so only the last
+  //    slot for a given task ever survived in PMS's calendar. Matching on
+  //    task_id + date + start_time gives each occurrence its own row.
+  const matchBySlot = !!options.matchBySlot;
+  const existing = matchBySlot
+    ? await pmsPool.query(
+      `SELECT id FROM calendar_events WHERE user_id = $1 AND task_id = $2 AND date = $3 AND start_time = $4 AND calendar_type = 'task'`,
+      [pmsUserId, taskUuid, evt.date ?? null, evt.startTime ?? null]
+    )
+    : await pmsPool.query(
+      `SELECT id FROM calendar_events WHERE user_id = $1 AND task_id = $2 AND calendar_type = 'task'`,
+      [pmsUserId, taskUuid]
+    );
 
   // UUID regex for validating values before they hit UUID columns
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

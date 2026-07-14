@@ -2649,7 +2649,7 @@ export async function registerRoutes(
               date: planDate,
               startTime: tStart,
               endTime: tEnd,
-            });
+            }, { matchBySlot: true });
           } catch (pmsSyncError) {
             console.error(`Failed to sync plan task ${t.id} to PMS calendar:`, pmsSyncError);
           }
