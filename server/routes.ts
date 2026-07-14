@@ -2596,38 +2596,37 @@ export async function registerRoutes(
             totalHours = `${String(Math.floor(diffMin / 60)).padStart(2, '0')}:${String(diffMin % 60).padStart(2, '0')}`;
           }
 
-          const isBreak = t.isBreak || t.task_name?.toLowerCase().includes("break") || t.task_name?.toLowerCase().includes("lunch");
+          // Allow breaks to be inserted as well. 
+          // Check if we already created a time entry for this task on this date with the exact same time block
+          const alreadyExists = todayEntries.some((e: any) => {
+            const sameTask = (t.id && !t.id.startsWith('planned-') && !t.id.startsWith('break-'))
+              ? (e.pmsId === t.id || e.pmsSubtaskId === t.id)
+              : (e.taskDescription === t.task_name);
+            return sameTask && e.startTime === tStart && e.endTime === tEnd;
+          });
 
-          if (!isBreak) {
-            // Check if we already created a time entry for this task on this date
-            const alreadyExists = todayEntries.some((e: any) => {
-              if (t.id && !t.id.startsWith('planned-') && !t.id.startsWith('break-')) {
-                return e.pmsId === t.id || e.pmsSubtaskId === t.id;
-              }
-              return e.taskDescription === t.task_name;
+          if (!alreadyExists) {
+            await storage.createTimeEntry({
+              employeeId,
+              employeeCode: employee.employeeCode,
+              employeeName: employee.name,
+              date: planDate,
+              projectName: t.projectName || t.project_code || "General",
+              taskDescription: t.task_name,
+              quantify: "",
+              startTime: tStart,
+              endTime: tEnd,
+              totalHours,
+              pmsId: t.id && !t.id.startsWith('planned-') && !t.id.startsWith('break-') ? t.id : null,
+              status: 'draft'
             });
-
-            if (!alreadyExists) {
-              await storage.createTimeEntry({
-                employeeId,
-                employeeCode: employee.employeeCode,
-                employeeName: employee.name,
-                date: planDate,
-                projectName: t.projectName || t.project_code || "General",
-                taskDescription: t.task_name,
-                quantify: "",
-                startTime: tStart,
-                endTime: tEnd,
-                totalHours,
-                pmsId: t.id && !t.id.startsWith('planned-') && !t.id.startsWith('break-') ? t.id : null,
-                status: 'draft'
-              });
-              todayEntries.push({
-                date: planDate,
-                pmsId: t.id && !t.id.startsWith('planned-') && !t.id.startsWith('break-') ? t.id : null,
-                taskDescription: t.task_name
-              } as any);
-            }
+            todayEntries.push({
+              date: planDate,
+              pmsId: t.id && !t.id.startsWith('planned-') && !t.id.startsWith('break-') ? t.id : null,
+              taskDescription: t.task_name,
+              startTime: tStart,
+              endTime: tEnd
+            } as any);
           }
         }
       }
@@ -2668,6 +2667,13 @@ export async function registerRoutes(
 
       broadcast("daily_plan_submitted", { plan, employeeId });
 
+      // Sort tasks chronologically for email
+      const sortedTasksForEmail = [...selectedTasks].sort((a, b) => {
+        const aStart = a.scheduleData?.startTime || a.startTime || "00:00";
+        const bStart = b.scheduleData?.startTime || b.startTime || "00:00";
+        return aStart.localeCompare(bStart);
+      });
+
       // Email notification
       try {
         const { sendDailyPlanSubmittedEmail, sendDailyPlanConfirmationEmail } = await import('./email');
@@ -2678,7 +2684,7 @@ export async function registerRoutes(
           await sendDailyPlanSubmittedEmail({
             employeeName: emp.name,
             employeeCode: emp.employeeCode,
-            selectedTasks: selectedTasks,
+            selectedTasks: sortedTasksForEmail,
             unselectedTasks: unselectedTasks || []
           });
 
@@ -2689,7 +2695,7 @@ export async function registerRoutes(
               employeeCode: emp.employeeCode,
               employeeEmail: emp.email,
               date: planDate,
-              selectedTasks: selectedTasks,
+              selectedTasks: sortedTasksForEmail,
               unselectedTasks: unselectedTasks || []
             });
           }

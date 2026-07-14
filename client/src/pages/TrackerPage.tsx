@@ -637,11 +637,25 @@ export default function TrackerPage({ user }: TrackerPageProps) {
   const REQUIRED_MINUTES = 8 * 60;
   const hasEnoughHours = totalCombinedMinutes >= REQUIRED_MINUTES;
 
+  // Check if any draft tasks are missing required fields
+  const hasInvalidDraftTasks = useMemo(() => {
+    const draftTasks = todaysTasksOnly.filter(t => t.serverStatus === 'draft');
+    return draftTasks.some(t => {
+      const hasProject = !!t.project;
+      const hasTitle = !!t.title;
+      const hasTimes = !!t.startTime && !!t.endTime;
+      const hasTools = t.toolsUsed && t.toolsUsed.length > 0;
+      const hasQuantify = !!(t as any).quantify;
+      return !hasProject || !hasTitle || !hasTimes || !hasTools || !hasQuantify;
+    });
+  }, [todaysTasksOnly]);
+
   const canSubmit =
     !isSubmitting &&
     !needsPlan &&
     todaysTasksOnly.length > 0 &&
-    (hasEnoughHours || settings.forceAllowFinalSubmit);
+    (hasEnoughHours || settings.forceAllowFinalSubmit) &&
+    !hasInvalidDraftTasks;
 
 
   const handleSaveTask = async (taskData: Task) => {
@@ -792,40 +806,41 @@ export default function TrackerPage({ user }: TrackerPageProps) {
         return;
       }
 
+      // Validate all draft tasks (both pending local and server draft entries)
+      const tasksToValidate = todaysTasksOnly.filter(t => t.serverStatus === 'draft');
+      const invalidTasks = tasksToValidate.filter(t => {
+        const hasProject = !!t.project;
+        const hasTitle = !!t.title;
+        const hasTimes = !!t.startTime && !!t.endTime;
+        const hasTools = t.toolsUsed && t.toolsUsed.length > 0;
+        const hasQuantify = !!(t as any).quantify;
+        return !hasProject || !hasTitle || !hasTimes || !hasTools || !hasQuantify;
+      });
+
+      if (invalidTasks.length > 0) {
+        toast({
+          title: 'Incomplete Tasks',
+          description: `Please fill in all required fields (Project, Task, Start/End Time, Quantify, Tools) for all draft tasks before submitting.`,
+          variant: 'destructive'
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Check for invalid durations in draft tasks
+      const hasInvalidDuration = tasksToValidate.some(t => calculateTaskMinutes(t) <= 0);
+      if (hasInvalidDuration) {
+        toast({
+          title: 'Invalid Time Entries',
+          description: 'One or more tasks have invalid start/end times. Please correct them.',
+          variant: 'destructive'
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
       // Step 1: If there are pending (local) tasks, submit them first
       if (pendingTasks.length > 0) {
-        // Detailed validation of each pending task
-        const invalidTasks = pendingTasks.filter(t => {
-          const hasProject = !!t.project;
-          const hasTitle = !!t.title;
-          const hasTimes = !!t.startTime && !!t.endTime;
-          const hasTools = t.toolsUsed && t.toolsUsed.length > 0;
-          const hasQuantify = !!(t as any).quantify;
-          return !hasProject || !hasTitle || !hasTimes || !hasTools || !hasQuantify;
-        });
-
-        if (invalidTasks.length > 0) {
-          toast({
-            title: 'Incomplete Tasks',
-            description: `Please fill in all required fields (Project, Task, Start/End Time, Quantify, Tools) for all tasks before submitting.`,
-            variant: 'destructive'
-          });
-          setIsSubmitting(false);
-          return;
-        }
-
-        // Check for overlapping times or invalid durations
-        const hasInvalidDuration = pendingTasks.some(t => calculateTaskMinutes(t) <= 0);
-        if (hasInvalidDuration) {
-          toast({
-            title: 'Invalid Time Entries',
-            description: 'One or more tasks have invalid start/end times. Please correct them.',
-            variant: 'destructive'
-          });
-          setIsSubmitting(false);
-          return;
-        }
-
         // Submit all pending tasks to database in parallel
         await Promise.all(pendingTasks.map(task =>
           apiRequest('POST', '/api/time-entries', {
