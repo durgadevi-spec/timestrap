@@ -2605,7 +2605,9 @@ export async function registerRoutes(
             return sameTask && e.startTime === tStart && e.endTime === tEnd;
           });
 
-          if (!alreadyExists) {
+          const isBreakTask = t.isBreak || (t.id && String(t.id).startsWith('break-'));
+
+          if (!alreadyExists && !isBreakTask) {
             await storage.createTimeEntry({
               employeeId,
               employeeCode: employee.employeeCode,

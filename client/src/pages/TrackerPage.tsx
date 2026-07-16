@@ -65,6 +65,14 @@ export default function TrackerPage({ user }: TrackerPageProps) {
     const dateParam = params.get('date');
     if (dateParam) {
       const parsedDate = new Date(dateParam);
+      if (!isNaN(parsedDate.getTime())) {
+        localStorage.setItem('tracker_selected_date', dateParam);
+        return parsedDate;
+      }
+    }
+    const storedDate = localStorage.getItem('tracker_selected_date');
+    if (storedDate) {
+      const parsedDate = new Date(storedDate);
       if (!isNaN(parsedDate.getTime())) return parsedDate;
     }
     return new Date();
@@ -1167,6 +1175,7 @@ export default function TrackerPage({ user }: TrackerPageProps) {
                       }
 
                       setSelectedDate(date);
+                      localStorage.setItem('tracker_selected_date', format(date, 'yyyy-MM-dd'));
                       loadTasksForDate(date);
                     }
                   }}
