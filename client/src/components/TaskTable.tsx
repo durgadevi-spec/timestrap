@@ -182,7 +182,7 @@ export default function TaskTable({ tasks, onEdit, onDelete, onComplete, onReope
                   </div>
                 </TableCell>
                 <TableCell className="text-right">
-                  {(task.serverStatus === 'draft' || task.serverStatus === 'pending' || task.serverStatus === 'rejected') ? (
+                  {(task.serverStatus === 'draft' || task.serverStatus === 'rejected') ? (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
