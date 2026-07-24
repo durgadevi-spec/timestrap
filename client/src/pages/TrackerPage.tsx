@@ -63,21 +63,14 @@ export default function TrackerPage({ user }: TrackerPageProps) {
   const [selectedDate, setSelectedDate] = useState<Date>(() => {
     const params = new URLSearchParams(window.location.search);
     const dateParam = params.get('date');
-    const todayStr = new Date().toDateString();
     
     if (dateParam) {
       const parsedDate = new Date(dateParam);
       if (!isNaN(parsedDate.getTime())) {
-        localStorage.setItem('tracker_selected_date', dateParam);
-        localStorage.setItem('tracker_saved_on_date', todayStr);
+        // Clear the query parameter so refresh doesn't keep it
+        window.history.replaceState({}, '', window.location.pathname);
         return parsedDate;
       }
-    }
-    const storedDate = localStorage.getItem('tracker_selected_date');
-    const savedOnDate = localStorage.getItem('tracker_saved_on_date');
-    if (storedDate && savedOnDate === todayStr) {
-      const parsedDate = new Date(storedDate);
-      if (!isNaN(parsedDate.getTime())) return parsedDate;
     }
     return new Date();
   });
@@ -1179,8 +1172,6 @@ export default function TrackerPage({ user }: TrackerPageProps) {
                       }
 
                       setSelectedDate(date);
-                      localStorage.setItem('tracker_selected_date', format(date, 'yyyy-MM-dd'));
-                      localStorage.setItem('tracker_saved_on_date', new Date().toDateString());
                       loadTasksForDate(date);
                     }
                   }}
