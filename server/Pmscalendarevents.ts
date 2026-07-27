@@ -570,7 +570,18 @@ export async function upsertPlanCalendarEvent(
   const insertPayload = await buildInsertPayload(evt);
   // Force plan-specific values and sanitize UUID fields
   insertPayload.calendar_type = "task";
-  insertPayload.task_title = evt.title || "Untitled task";
+  // `task_title` is NOT a guaranteed column on PMS's calendar_events table —
+  // unlike every other extra field here, it was being force-set without a
+  // columns.has() guard. When the column doesn't exist, Postgres rejects the
+  // whole INSERT ("column task_title does not exist"), and since this call
+  // is wrapped in a try/catch in routes.ts, that failure was silently
+  // swallowed — the plan submission "succeeded" but nothing was ever written
+  // to calendar_events. The task's title is already carried by the `title`
+  // column below, so only add task_title if the table actually has it.
+  const insertColumnsAvailable = await getCalendarEventColumns();
+  if (insertColumnsAvailable.has("task_title")) {
+    insertPayload.task_title = evt.title || "Untitled task";
+  }
   insertPayload.task_id = taskUuid;
   // Guard project_id: only keep it if it's a proper UUID
   if (insertPayload.project_id && !UUID_RE.test(insertPayload.project_id)) {
